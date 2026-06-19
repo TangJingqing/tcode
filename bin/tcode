@@ -1,0 +1,18 @@
+#!/usr/bin/env node
+import { spawn } from 'child_process';
+import { dirname, join, resolve } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const rootDir = resolve(__dirname, '..');
+const entryPoint = join(rootDir, 'src', 'index.ts');
+const tsx = join(rootDir, 'node_modules', '.bin', 'tsx');
+
+const child = spawn(tsx, [entryPoint, ...process.argv.slice(2)], {
+  stdio: 'inherit',
+  cwd: process.cwd(),
+  env: { ...process.env, __TCODE_ROOT: rootDir },
+});
+
+child.on('exit', (code) => process.exit(code ?? 0));

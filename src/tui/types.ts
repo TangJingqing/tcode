@@ -1,0 +1,18 @@
+export type TranscriptEntry =
+  | {
+      id: number
+      kind: 'user'
+      body: string
+    }
+  | {
+      id: number
+      kind: 'assistant'
+      body: string
+    }
+  | {
+      id: number
+      kind: 'tool'
+      toolName: string
+      status: 'running' | 'success' | 'error'
+      body: string
+    }

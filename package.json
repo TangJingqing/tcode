@@ -1,0 +1,24 @@
+{
+  "name": "tcode",
+  "version": "0.1.0",
+  "description": "A lightweight terminal coding assistant CLI",
+  "type": "module",
+  "bin": {
+    "tcode": "./bin/tcode"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "install-cli": "tsx src/install.ts"
+  },
+  "dependencies": {
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

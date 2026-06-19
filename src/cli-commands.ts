@@ -1,0 +1,163 @@
+import {
+  CLAUDE_SETTINGS_PATH,
+  TCODE_PERMISSIONS_PATH,
+  TCODE_SETTINGS_PATH,
+  loadRuntimeConfig,
+  saveTcodeSettings,
+} from './config.js'
+
+export type SlashCommand = {
+  name: string
+  usage: string
+  description: string
+}
+
+export const SLASH_COMMANDS: SlashCommand[] = [
+  {
+    name: '/help',
+    usage: '/help',
+    description: 'Show available slash commands.',
+  },
+  {
+    name: '/tools',
+    usage: '/tools',
+    description: 'List tools available to the coding agent and tool shortcuts.',
+  },
+  {
+    name: '/status',
+    usage: '/status',
+    description: 'Show current model and config source.',
+  },
+  {
+    name: '/model',
+    usage: '/model',
+    description: 'Show the current model.',
+  },
+  {
+    name: '/model',
+    usage: '/model <model-name>',
+    description: 'Persist a model override into ~/.tcode/settings.json.',
+  },
+  {
+    name: '/config-paths',
+    usage: '/config-paths',
+    description: 'Show tcode and Claude fallback settings paths.',
+  },
+  {
+    name: '/permissions',
+    usage: '/permissions',
+    description: 'Show tcode permission storage path.',
+  },
+  {
+    name: '/exit',
+    usage: '/exit',
+    description: 'Exit tcode.',
+  },
+  {
+    name: '/ls',
+    usage: '/ls [path]',
+    description: 'List files in a directory.',
+  },
+  {
+    name: '/grep',
+    usage: '/grep <pattern>::[path]',
+    description: 'Search text in files.',
+  },
+  {
+    name: '/read',
+    usage: '/read <path>',
+    description: 'Read a file directly.',
+  },
+  {
+    name: '/write',
+    usage: '/write <path>::<content>',
+    description: 'Write a file directly.',
+  },
+  {
+    name: '/modify',
+    usage: '/modify <path>::<content>',
+    description: 'Replace a file, showing a reviewable diff before applying it.',
+  },
+  {
+    name: '/edit',
+    usage: '/edit <path>::<search>::<replace>',
+    description: 'Edit a file by exact replacement.',
+  },
+  {
+    name: '/patch',
+    usage: '/patch <path>::<search1>::<replace1>::<search2>::<replace2>...',
+    description: 'Apply multiple replacements to one file in one command.',
+  },
+  {
+    name: '/cmd',
+    usage: '/cmd [cwd::]<command> [args...]',
+    description: 'Run an allowed development command directly, optionally in another directory.',
+  },
+]
+
+export function formatSlashCommands(): string {
+  return SLASH_COMMANDS.map(command => `${command.usage}  ${command.description}`).join('\n')
+}
+
+export function findMatchingSlashCommands(input: string): string[] {
+  return SLASH_COMMANDS
+    .map(command => command.usage)
+    .filter(command => command.startsWith(input))
+}
+
+export async function tryHandleLocalCommand(input: string): Promise<string | null> {
+  if (input === '/') {
+    return formatSlashCommands()
+  }
+
+  if (input === '/help') {
+    return formatSlashCommands()
+  }
+
+  if (input === '/config-paths') {
+    return [
+      `tcode settings: ${TCODE_SETTINGS_PATH}`,
+      `tcode permissions: ${TCODE_PERMISSIONS_PATH}`,
+      `claude fallback: ${CLAUDE_SETTINGS_PATH}`,
+    ].join('\n')
+  }
+
+  if (input === '/permissions') {
+    return `permission store: ${TCODE_PERMISSIONS_PATH}`
+  }
+
+  if (input === '/status') {
+    const runtime = await loadRuntimeConfig()
+    return [
+      `model: ${runtime.model}`,
+      `baseUrl: ${runtime.baseUrl}`,
+      `auth: ${runtime.authToken ? 'ANTHROPIC_AUTH_TOKEN' : 'ANTHROPIC_API_KEY'}`,
+      runtime.sourceSummary,
+    ].join('\n')
+  }
+
+  if (input === '/model') {
+    const runtime = await loadRuntimeConfig()
+    return `current model: ${runtime.model}`
+  }
+
+  if (input.startsWith('/model ')) {
+    const model = input.slice('/model '.length).trim()
+    if (!model) {
+      return '用法: /model <model-name>'
+    }
+
+    await saveTcodeSettings({ model })
+    return `saved model=${model} to ${TCODE_SETTINGS_PATH}`
+  }
+
+  return null
+}
+
+export function completeSlashCommand(line: string): [string[], string] {
+  const hits = SLASH_COMMANDS
+    .map(command => command.usage)
+    .filter(command => command.startsWith(line))
+
+  return [hits.length > 0 ? hits : SLASH_COMMANDS.map(command => command.usage), line]
+}
