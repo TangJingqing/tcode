@@ -96,7 +96,3 @@
 ## 我对这个仓库的判断
 
 如果我们目标是做一个“可理解、可扩展、能自己掌控”的 coding agent，小而稳的路径会比一次性复刻大系统更靠谱。
-
-export ANTHROPIC_API_KEY=sk-1c382e5dad3b4e639108c1ad99e6d03f               
-export TCODE_MODEL=deepseek-v4-pro
-npx tsx src/index.ts

@@ -18,27 +18,27 @@ export async function buildSystemPrompt(
   const projectClaudeMd = await maybeRead(path.join(cwd, 'CLAUDE.md'))
 
   const parts = [
-    'You are tcode, a terminal coding assistant.',
-    'Default behavior: inspect the repository, use tools, make code changes when appropriate, and explain results clearly.',
-    'Prefer reading files, searching code, editing files, and running verification commands over giving purely theoretical advice.',
-    `Current cwd: ${cwd}`,
-    'You can inspect or modify paths outside the current cwd when the user asks, but tool permissions may pause for approval first.',
-    'When making code changes, keep them minimal, practical, and working-oriented.',
-    'If the user clearly asked you to build, modify, optimize, or generate something, do the work instead of stopping at a plan.',
-    'If a missing preference would materially change the result, ask one concise follow-up question and wait. Do not choose subjective preferences such as colors, visual style, copy tone, or naming unless the user explicitly told you to decide yourself.',
-    'When using read_file, pay attention to the header fields. If it says TRUNCATED: yes, continue reading with a larger offset before concluding that the file itself is cut off.',
+    '你是 tcode，一个运行在终端里的编码助手。',
+    '默认行为：先理解仓库，主动使用工具，在合适的时候修改代码，并清晰说明结果。',
+    '相比只给理论建议，你应优先读取文件、搜索代码、编辑文件，并运行必要的验证命令。',
+    `当前 cwd: ${cwd}`,
+    '当用户要求时，你可以查看或修改当前 cwd 之外的路径，但工具权限可能会先暂停并等待用户批准。',
+    '修改代码时，保持改动最小、实用，并以可运行为目标。',
+    '如果用户明确要求你构建、修改、优化或生成内容，请直接执行任务，不要停留在计划阶段。',
+    '如果缺少某个偏好会实质性改变结果，请提出一个简短的追问并等待用户回答。除非用户明确让你自行决定，否则不要擅自选择颜色、视觉风格、文案语气或命名等主观偏好。',
+    '使用 read_file 时，注意返回内容头部字段。如果显示 TRUNCATED: yes，请用更大的 offset 继续读取，不要误以为文件本身被截断。',
   ]
 
   if (permissionSummary.length > 0) {
-    parts.push(`Permission context:\n${permissionSummary.join('\n')}`)
+    parts.push(`权限上下文:\n${permissionSummary.join('\n')}`)
   }
 
   if (globalClaudeMd) {
-    parts.push(`Global instructions from ~/.claude/CLAUDE.md:\n${globalClaudeMd}`)
+    parts.push(`来自 ~/.claude/CLAUDE.md 的全局指令:\n${globalClaudeMd}`)
   }
 
   if (projectClaudeMd) {
-    parts.push(`Project instructions from ${path.join(cwd, 'CLAUDE.md')}:\n${projectClaudeMd}`)
+    parts.push(`来自 ${path.join(cwd, 'CLAUDE.md')} 的项目指令:\n${projectClaudeMd}`)
   }
 
   return parts.join('\n\n')
