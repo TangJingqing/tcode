@@ -150,7 +150,7 @@ async function main(): Promise<void> {
   try {
     rl.close()
   } catch {
-    // Ignore double-close during EOF teardown.
+    // 在输入结束的收尾阶段忽略重复关闭。
   }
 }
 

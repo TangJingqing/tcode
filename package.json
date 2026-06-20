@@ -11,6 +11,7 @@
     "install-cli": "tsx src/install.ts"
   },
   "dependencies": {
+    "diff": "^8.0.4",
     "zod": "^3.22.4"
   },
   "devDependencies": {

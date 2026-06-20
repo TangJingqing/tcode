@@ -1,17 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { createTwoFilesPatch } from 'diff'
 import type { ToolContext, ToolResult } from './tool.js'
-
-function clampLines(lines: string[], maxLines: number): string[] {
-  if (lines.length <= maxLines) {
-    return lines
-  }
-
-  return [
-    ...lines.slice(0, maxLines),
-    `... (${lines.length - maxLines} more line(s))`,
-  ]
-}
 
 export function buildUnifiedDiff(
   filePath: string,
@@ -22,43 +12,22 @@ export function buildUnifiedDiff(
     return `(no changes for ${filePath})`
   }
 
-  const beforeLines = before.split('\n')
-  const afterLines = after.split('\n')
+  const raw = createTwoFilesPatch(
+    `a/${filePath}`,
+    `b/${filePath}`,
+    before,
+    after,
+    '',
+    '',
+    { context: 3 },
+  )
 
-  let prefix = 0
-  while (
-    prefix < beforeLines.length &&
-    prefix < afterLines.length &&
-    beforeLines[prefix] === afterLines[prefix]
-  ) {
-    prefix += 1
+  // 去掉开头的分隔线，让终端审批界面的输出更紧凑。
+  const lines = raw.split('\n')
+  if (lines[0]?.startsWith('===')) {
+    return lines.slice(1).join('\n')
   }
-
-  let beforeSuffix = beforeLines.length - 1
-  let afterSuffix = afterLines.length - 1
-  while (
-    beforeSuffix >= prefix &&
-    afterSuffix >= prefix &&
-    beforeLines[beforeSuffix] === afterLines[afterSuffix]
-  ) {
-    beforeSuffix -= 1
-    afterSuffix -= 1
-  }
-
-  const removed = beforeLines.slice(prefix, beforeSuffix + 1)
-  const added = afterLines.slice(prefix, afterSuffix + 1)
-
-  const hunk = [
-    `@@ -${prefix + 1},${Math.max(removed.length, 0)} +${prefix + 1},${Math.max(added.length, 0)} @@`,
-    ...clampLines(removed, 80).map(line => `-${line}`),
-    ...clampLines(added, 80).map(line => `+${line}`),
-  ]
-
-  return [
-    `--- a/${filePath}`,
-    `+++ b/${filePath}`,
-    ...hunk,
-  ].join('\n')
+  return raw
 }
 
 export async function loadExistingFile(targetPath: string): Promise<string> {

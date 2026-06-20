@@ -8,6 +8,7 @@ import {
 import { loadHistoryEntries, saveHistoryEntries } from './history.js'
 import { parseLocalToolShortcut } from './local-tool-shortcuts.js'
 import {
+  PermissionDecision,
   PermissionManager,
   PermissionRequest,
   PermissionPromptResult,
@@ -49,6 +50,7 @@ type PendingApproval = {
   resolve: (result: PermissionPromptResult) => void
   detailsExpanded: boolean
   detailsScrollOffset: number
+  selectedChoiceIndex: number
   feedbackMode: boolean
   feedbackInput: string
 }
@@ -349,6 +351,7 @@ function renderScreen(args: TtyAppArgs, state: ScreenState): void {
       renderPermissionPrompt(state.pendingApproval.request, {
         expanded: state.pendingApproval.detailsExpanded,
         scrollOffset: state.pendingApproval.detailsScrollOffset,
+        selectedChoiceIndex: state.pendingApproval.selectedChoiceIndex,
         feedbackMode: state.pendingApproval.feedbackMode,
         feedbackInput: state.pendingApproval.feedbackInput,
       }),
@@ -507,7 +510,7 @@ async function handleInput(
         state.status = `Running ${toolName}...`
         state.activeTool = toolName
 
-        // Aggregate repeated edits to the same file into one progress entry.
+        // 将同一文件上的重复编辑聚合为一条进度记录。
         const editPath = isFileEditTool(toolName)
           ? extractPathFromToolInput(toolInput)
           : null
@@ -667,6 +670,7 @@ function createPermissionPromptHandler(
         resolve,
         detailsExpanded: false,
         detailsScrollOffset: 0,
+        selectedChoiceIndex: 0,
         feedbackMode: false,
         feedbackInput: '',
       }
@@ -740,7 +744,7 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
         if (state.pendingApproval) {
           const pending = state.pendingApproval
 
-          // Feedback sub-mode: capture free text to hand back to the model.
+          // 反馈子模式：采集自由文本并回传给模型。
           if (pending.feedbackMode) {
             if (event.kind === 'key' && event.name === 'escape') {
               pending.feedbackMode = false
@@ -774,7 +778,7 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
             return
           }
 
-          // Ctrl+O toggles the full diff view (edit requests only).
+          // 控制组合键加字母键可切换完整差异视图（仅编辑请求可用）。
           if (event.kind === 'text' && event.ctrl && event.text === 'o') {
             if (pending.request.kind === 'edit') {
               pending.detailsExpanded = !pending.detailsExpanded
@@ -784,7 +788,7 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
             return
           }
 
-          // Scroll the expanded diff with wheel / PgUp / PgDn.
+          // 在展开的差异视图中使用滚轮、上翻页或下翻页进行滚动。
           if (pending.detailsExpanded) {
             const scrollBy = (delta: number): void => {
               const maxOffset = getPermissionPromptMaxScrollOffset(pending.request, {
@@ -814,26 +818,61 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
             }
           }
 
-          const keyChar = event.kind === 'text' && !event.ctrl && !event.meta ? event.text : ''
-          const choice = pending.request.choices.find(item => item.key === keyChar)
+          // 方向键导航：移动当前选中项。
+          if (
+            event.kind === 'key' &&
+            (event.name === 'up' || event.name === 'down') &&
+            !event.meta
+          ) {
+            const total = pending.request.choices.length
+            if (total > 0) {
+              const delta = event.name === 'up' ? -1 : 1
+              pending.selectedChoiceIndex =
+                (pending.selectedChoiceIndex + delta + total) % total
+              renderScreen(permissionArgs, state)
+            }
+            return
+          }
 
-          if (choice) {
-            // Defer denials-with-feedback to the text capture sub-mode.
-            if (choice.decision === 'deny_with_feedback') {
+          // 处理所选项；若为反馈选项则切换到文本反馈子模式。
+          const applyChoice = (decision: PermissionDecision): void => {
+            if (decision === 'deny_with_feedback') {
               pending.feedbackMode = true
               pending.feedbackInput = ''
               renderScreen(permissionArgs, state)
               return
             }
-
             state.pendingApproval = null
             state.status = null
-            pending.resolve({ decision: choice.decision })
+            pending.resolve({ decision })
             renderScreen(permissionArgs, state)
+          }
+
+          // 字母快捷键：无论当前选中项为何，都可直接选择对应选项。
+          const keyChar = event.kind === 'text' && !event.ctrl && !event.meta ? event.text : ''
+          const choice = pending.request.choices.find(item => item.key === keyChar)
+          if (choice) {
+            applyChoice(choice.decision)
             return
           }
 
-          if (event.kind === 'key' && (event.name === 'escape' || event.name === 'return')) {
+          // 回车确认当前选中项。
+          if (event.kind === 'key' && event.name === 'return') {
+            const total = pending.request.choices.length
+            const selected =
+              total > 0
+                ? pending.request.choices[
+                    ((pending.selectedChoiceIndex % total) + total) % total
+                  ]
+                : undefined
+            if (selected) {
+              applyChoice(selected.decision)
+            }
+            return
+          }
+
+          // 退出键执行“仅拒绝一次”。
+          if (event.kind === 'key' && event.name === 'escape') {
             state.pendingApproval = null
             state.status = null
             pending.resolve({ decision: 'deny_once' })

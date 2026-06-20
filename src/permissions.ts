@@ -207,8 +207,8 @@ export class PermissionManager {
   }
 
   /**
-   * Reset turn-scoped edit grants. Call at the start of every agent turn so
-   * "allow this turn" approvals do not leak into the next user request.
+   * 重置当前轮次范围内的编辑授权。应在每次智能体轮次开始时调用，
+   * 避免“仅本轮允许”的审批结果泄漏到下一次用户请求。
    */
   beginTurn(): void {
     this.turnAllowedEdits.clear()

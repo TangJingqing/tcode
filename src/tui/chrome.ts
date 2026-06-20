@@ -126,6 +126,7 @@ export function renderSlashMenu(
 type PermissionPromptRenderOptions = {
   expanded?: boolean
   scrollOffset?: number
+  selectedChoiceIndex?: number
   feedbackMode?: boolean
   feedbackInput?: string
 }
@@ -199,6 +200,7 @@ export function renderPermissionPrompt(
       : request.details
   const expanded = options.expanded ?? false
   const scrollOffset = options.scrollOffset ?? 0
+  const selectedChoiceIndex = options.selectedChoiceIndex ?? 0
   const feedbackMode = options.feedbackMode ?? false
   const feedbackInput = options.feedbackInput ?? ''
   const detailLines = flattenDetailLines(details)
@@ -240,9 +242,17 @@ export function renderPermissionPrompt(
     return promptLines.join('\n')
   }
 
-  // Single-letter hotkey style (tcode convention), not arrow-key navigation.
+  // \u65b9\u5411\u952e\u9009\u62e9\u5f53\u524d\u9879\u3002
+  // \u5b57\u6bcd\u952e\u4ecd\u53ef\u76f4\u63a5\u89e6\u53d1\u9009\u9879\u3002
+  const total = request.choices.length
+  const activeIndex = total > 0 ? ((selectedChoiceIndex % total) + total) % total : 0
   promptLines.push(
-    ...request.choices.map(choice => `${BOLD}${choice.key}${RESET} ${choice.label}`),
+    ...request.choices.map((choice, index) => {
+      const marker = index === activeIndex ? `${REVERSE}>${RESET}` : ' '
+      return `${marker} ${BOLD}${choice.key}${RESET} ${choice.label}`
+    }),
+    '',
+    `${DIM}Up/Down select ù Enter confirm ù letter shortcut ù Esc deny once${RESET}`,
   )
   return promptLines.join('\n')
 }
@@ -371,7 +381,7 @@ function colorizeUnifiedDiffBlock(block: string): string {
     kind: classifyDiffLine(raw),
   }))
 
-  // Pair adjacent removed/added lines and emphasize changed word spans.
+  // \u5220\u9664\u884c\u4e0e\u65b0\u589e\u884c\u6210\u5bf9\u6bd4\u8f83\uff0c\u5e76\u9ad8\u4eae\u8bcd\u7ea7\u5dee\u5f02\u3002
   for (let i = 0; i < styled.length; i += 1) {
     if (styled[i]?.kind !== 'remove') {
       continue

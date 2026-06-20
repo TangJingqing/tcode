@@ -28,6 +28,6 @@ export function exitAlternateScreen(): void {
 }
 
 export function clearScreen(): void {
-  // Softer redraw than full clear to reduce visible flicker.
+  // 比整屏清空更柔和的重绘方式，减少可见闪烁。
   process.stdout.write('\u001b[H\u001b[J')
 }
