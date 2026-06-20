@@ -4,8 +4,11 @@ import { TCODE_DIR } from './config.js'
 
 export type PermissionDecision =
   | 'allow_once'
+  | 'allow_turn'
+  | 'allow_all_turn'
   | 'allow_always'
   | 'deny_once'
+  | 'deny_with_feedback'
   | 'deny_always'
 
 export type PermissionChoice = {
@@ -22,9 +25,14 @@ export type PermissionRequest = {
   choices: PermissionChoice[]
 }
 
+export type PermissionPromptResult = {
+  decision: PermissionDecision
+  feedback?: string
+}
+
 export type PermissionPromptHandler = (
   request: PermissionRequest,
-) => Promise<PermissionDecision>
+) => Promise<PermissionPromptResult>
 
 type PermissionStore = {
   allowedDirectoryPrefixes?: string[]
@@ -155,6 +163,8 @@ export class PermissionManager {
   private readonly deniedEditPatterns = new Set<string>()
   private readonly sessionAllowedEdits = new Set<string>()
   private readonly sessionDeniedEdits = new Set<string>()
+  private readonly turnAllowedEdits = new Set<string>()
+  private turnAllowAllEdits = false
   private ready: Promise<void>
 
   constructor(
@@ -194,6 +204,20 @@ export class PermissionManager {
 
   async whenReady(): Promise<void> {
     await this.ready
+  }
+
+  /**
+   * Reset turn-scoped edit grants. Call at the start of every agent turn so
+   * "allow this turn" approvals do not leak into the next user request.
+   */
+  beginTurn(): void {
+    this.turnAllowedEdits.clear()
+    this.turnAllowAllEdits = false
+  }
+
+  endTurn(): void {
+    this.turnAllowedEdits.clear()
+    this.turnAllowAllEdits = false
   }
 
   getSummary(): string[] {
@@ -268,22 +292,24 @@ export class PermissionManager {
         ? normalizedTarget
         : path.dirname(normalizedTarget)
 
-    const decision = await this.prompt({
-      kind: 'path',
-      summary: `tcode wants ${intent.replace('_', ' ')} access outside the current cwd`,
-      details: [
-        `cwd: ${this.workspaceRoot}`,
-        `target: ${normalizedTarget}`,
-        `scope directory: ${scopeDirectory}`,
-      ],
-      scope: scopeDirectory,
-      choices: [
-        { key: 'y', label: 'allow once', decision: 'allow_once' },
-        { key: 'a', label: 'allow this directory', decision: 'allow_always' },
-        { key: 'n', label: 'deny once', decision: 'deny_once' },
-        { key: 'd', label: 'deny this directory', decision: 'deny_always' },
-      ],
-    })
+    const decision = (
+      await this.prompt({
+        kind: 'path',
+        summary: `tcode wants ${intent.replace('_', ' ')} access outside the current cwd`,
+        details: [
+          `cwd: ${this.workspaceRoot}`,
+          `target: ${normalizedTarget}`,
+          `scope directory: ${scopeDirectory}`,
+        ],
+        scope: scopeDirectory,
+        choices: [
+          { key: 'y', label: 'allow once', decision: 'allow_once' },
+          { key: 'a', label: 'allow this directory', decision: 'allow_always' },
+          { key: 'n', label: 'deny once', decision: 'deny_once' },
+          { key: 'd', label: 'deny this directory', decision: 'deny_always' },
+        ],
+      })
+    ).decision
 
     if (decision === 'allow_once') {
       this.sessionAllowedPaths.add(normalizedTarget)
@@ -341,22 +367,24 @@ export class PermissionManager {
       )
     }
 
-    const decision = await this.prompt({
-      kind: 'command',
-      summary: 'tcode wants to run a dangerous command',
-      details: [
-        `cwd: ${commandCwd}`,
-        `command: ${signature}`,
-        `reason: ${reason}`,
-      ],
-      scope: signature,
-      choices: [
-        { key: 'y', label: 'allow once', decision: 'allow_once' },
-        { key: 'a', label: 'always allow this command', decision: 'allow_always' },
-        { key: 'n', label: 'deny once', decision: 'deny_once' },
-        { key: 'd', label: 'always deny this command', decision: 'deny_always' },
-      ],
-    })
+    const decision = (
+      await this.prompt({
+        kind: 'command',
+        summary: 'tcode wants to run a dangerous command',
+        details: [
+          `cwd: ${commandCwd}`,
+          `command: ${signature}`,
+          `reason: ${reason}`,
+        ],
+        scope: signature,
+        choices: [
+          { key: 'y', label: 'allow once', decision: 'allow_once' },
+          { key: 'a', label: 'always allow this command', decision: 'allow_always' },
+          { key: 'n', label: 'deny once', decision: 'deny_once' },
+          { key: 'd', label: 'always deny this command', decision: 'deny_always' },
+        ],
+      })
+    ).decision
 
     if (decision === 'allow_once') {
       this.sessionAllowedCommands.add(signature)
@@ -393,6 +421,8 @@ export class PermissionManager {
 
     if (
       this.sessionAllowedEdits.has(normalizedTarget) ||
+      this.turnAllowedEdits.has(normalizedTarget) ||
+      this.turnAllowAllEdits ||
       this.allowedEditPatterns.has(normalizedTarget)
     ) {
       return
@@ -410,7 +440,7 @@ export class PermissionManager {
         ? [...previewLines.slice(0, 60), `... (${previewLines.length - 60} more line(s))`].join('\n')
         : diffPreview
 
-    const decision = await this.prompt({
+    const result = await this.prompt({
       kind: 'edit',
       summary: 'tcode wants to apply a file modification',
       details: [
@@ -421,14 +451,29 @@ export class PermissionManager {
       scope: normalizedTarget,
       choices: [
         { key: 'y', label: 'apply once', decision: 'allow_once' },
+        { key: 't', label: 'allow this file for this turn', decision: 'allow_turn' },
+        { key: 'A', label: 'allow all edits for this turn', decision: 'allow_all_turn' },
         { key: 'a', label: 'always allow this file', decision: 'allow_always' },
         { key: 'n', label: 'reject once', decision: 'deny_once' },
+        { key: 'f', label: 'reject and send guidance to model', decision: 'deny_with_feedback' },
         { key: 'd', label: 'always reject this file', decision: 'deny_always' },
       ],
     })
 
+    const { decision } = result
+
     if (decision === 'allow_once') {
       this.sessionAllowedEdits.add(normalizedTarget)
+      return
+    }
+
+    if (decision === 'allow_turn') {
+      this.turnAllowedEdits.add(normalizedTarget)
+      return
+    }
+
+    if (decision === 'allow_all_turn') {
+      this.turnAllowAllEdits = true
       return
     }
 
@@ -436,6 +481,17 @@ export class PermissionManager {
       this.allowedEditPatterns.add(normalizedTarget)
       await this.persist()
       return
+    }
+
+    if (decision === 'deny_with_feedback') {
+      const guidance = result.feedback?.trim()
+      this.sessionDeniedEdits.add(normalizedTarget)
+      if (guidance) {
+        throw new Error(
+          `Edit denied: ${normalizedTarget}\nUser guidance: ${guidance}`,
+        )
+      }
+      throw new Error(`Edit denied: ${normalizedTarget}`)
     }
 
     if (decision === 'deny_always') {

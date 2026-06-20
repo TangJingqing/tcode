@@ -1,98 +1,185 @@
 # tcode 架构说明
 
-这个文档描述 `tcode` 的轻量化设计决策。
-目标不是把终端 agent 做成“大而全”的平台，而是优先保留最有价值的执行闭环、交互体验和安全边界。
+一个面向本地开发工作流的轻量级终端编码助手。
 
-## 设计原则
+tcode 用更小的实现体量，提供了类 Claude Code 的工作流体验和架构思路，因此非常适合学习、实验，以及继续做自己的定制化开发。
 
-当前 `tcode` 优先保留这些能力：
+## 项目简介
 
-1. `模型 -> 工具 -> 模型` 的主循环
-2. 全屏 TUI 的交互节奏
-3. 目录感知、权限审批、危险操作确认
-4. transcript / tool / input 的组件化界面结构
-5. 用户可 review 的文件修改流程
+tcode 围绕一个实用的 terminal-first agent loop 构建：
 
-也就是说，`tcode` 是一个更小、更可控的终端编码助手。
+- 接收用户请求
+- 检查当前工作区
+- 在需要时调用工具
+- 修改文件前先 review
+- 在同一个终端会话里返回最终结果
 
-## 先保留什么
+整个项目有意保持紧凑，这样主控制流、工具模型和 TUI 行为都更容易理解和扩展。
 
-第一版只保留最核心的 4 层：
+## 目录
 
-1. CLI 入口层
-2. Agent Loop
-3. Tool Registry
-4. Tool Implementations
+- [为什么选择 MiniCode](#为什么选择-minicode)
+- [功能特性](#功能特性)
+- [安装](#安装)
+- [快速开始](#快速开始)
+- [命令](#命令)
+- [配置](#配置)
+- [项目结构](#项目结构)
+- [架构文档](#架构文档)
+- [开发说明](#开发说明)
 
-当前实现重点：
+## 为什么选择 tcode
 
-- 保留“模型 -> 工具 -> 模型”的循环骨架
-- 保留统一工具协议和集中注册
-- 保留消息驱动的终端交互节奏
-- 保留路径权限、命令权限、写入审批这些安全边界
+如果你希望得到下面这些东西，tcode 会很合适：
 
-## 第一版明确删掉什么
+- 一个轻量级 coding assistant，而不是庞大的平台
+- 一个带 tool calling、transcript 和命令工作流的终端 UI
+- 一个很适合阅读和二次开发的小代码库
+- 一个可用于学习类 Claude Code agent 架构的参考实现
 
-这些都很强，但不适合一开始就完整带上：
+## 功能特性
 
-- 完整 Ink/React 渲染栈
-- bridge / IDE 双向通信
-- remote session
-- task swarm / sub-agent 编排
-- LSP
-- skill marketplace
-- 复杂 permission 模式
-- feature flag 体系
-- telemetry / analytics
-- compact / memory / session restore
+### 核心工作流
 
-删掉它们的原因不是“不重要”，而是它们不在最短闭环里。
+- 单轮支持多步工具执行
+- `model -> tool -> model` 闭环
+- 全屏终端交互界面
+- 输入历史、transcript 滚动和 slash 命令菜单
 
-## 为什么主链路最值得保留
+### 内置工具
 
-这类工具最有价值的地方，不是功能多，而是这条闭环和交互边界都很清晰：
+- `list_files`
+- `grep_files`
+- `read_file`
+- `write_file`
+- `edit_file`
+- `patch_file`
+- `modify_file`
+- `run_command`
 
-1. 接收用户输入
-2. 送给模型
-3. 模型决定是否调用工具
-4. 执行工具
-5. 把结果回传模型
-6. 输出最终答复
+### 安全性与可用性
 
-如果这条链路稳定了，其它能力都可以挂上去。
+- 文件修改前先 review diff
+- 路径和命令权限检查
+- 独立配置目录和交互式安装器
+- 支持 Anthropic 风格接口
 
-## tcode 当前实现
+### 最近交互改进
+
+- 审批对话支持上下键选择与 Enter 确认（不再依赖字母键）
+- 支持“拒绝并给模型反馈”，可直接把修正建议发回模型
+- 编辑审批支持“本轮允许此文件”与“本轮允许全部编辑”
+- diff 预览改为标准 unified diff（更接近 `git diff`）
+- 审批页面支持 `Ctrl+O` 展开/收起与滚轮/分页滚动
+- 工具调用结果自动折叠为摘要，减少 transcript 噪音
+
+## 安装
+
+```bash
+cd mini-code
+npm install
+npm run install-local
+```
+
+安装器会询问：
+
+- 模型名称
+- `ANTHROPIC_BASE_URL`
+- `ANTHROPIC_AUTH_TOKEN`
+
+配置保存在：
+
+- `~/.tcode/settings.json`
+
+启动命令安装到：
+
+- `~/.local/bin/tcode`
+
+如果 `~/.local/bin` 不在你的 `PATH` 中，可以添加：
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+## 快速开始
+
+运行安装后的命令：
+
+```bash
+minicode
+```
+
+本地开发模式：
+
+```bash
+npm run dev
+```
+
+离线演示模式：
+
+```bash
+MINI_CODE_MODEL_MODE=mock npm run dev
+```
+
+## 命令
+
+### 本地 slash 命令
+
+- `/help`
+- `/tools`
+- `/status`
+- `/model`
+- `/model <name>`
+- `/config-paths`
+
+### 终端交互能力
+
+- 命令提示与 slash 菜单
+- transcript 滚动
+- 输入编辑
+- 历史输入导航
+- 审批界面上下键选择与反馈输入
+
+## 配置
+
+配置示例：
+
+```json
+{
+  "model": "your-model-name",
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+    "ANTHROPIC_AUTH_TOKEN": "your-token",
+    "ANTHROPIC_MODEL": "your-model-name"
+  }
+}
+```
+
+配置优先级：
+
+1. `~/.mini-code/settings.json`
+2. 兼容的本地已有配置
+3. 当前进程环境变量
+
+## 项目结构
 
 - `src/index.ts`: CLI 入口
-- `src/agent-loop.ts`: 有最大步数限制的多轮工具调用循环
-- `src/tool.ts`: 注册、校验、执行
-- `src/tools/*`: `list_files` / `grep_files` / `read_file` / `write_file` / `edit_file` / `patch_file` / `modify_file` / `run_command`
-- `src/config.ts`: 使用独立的 `~/.mini-code`
-- `src/anthropic-adapter.ts`: Anthropic 兼容 Messages API 适配器
-- `src/mock-model.ts`: 离线回退适配器
-- `src/permissions.ts`: 路径、命令、编辑审批与 allowlist / denylist
-- `src/file-review.ts`: 写文件前 diff review
-- `src/tui/*`: transcript / chrome / input / screen / markdown 终端组件
+- `src/agent-loop.ts`: 多步模型/工具循环
+- `src/tool.ts`: 工具注册与执行
+- `src/tools/*`: 内置工具集合
+- `src/tui/*`: 终端 UI 模块
+- `src/config.ts`: 运行时配置加载
+- `src/install.ts`: 交互式安装器
 
-## 第二阶段建议
+## 架构文档
 
-当第一版稳定后，再按顺序加：
+- [Architecture Overview](./ARCHITECTURE.md)
+- [中文架构说明](./ARCHITECTURE_ZH.md)
 
-1. 更完整的虚拟滚动 transcript
-2. 更完整的输入编辑行为
-3. 更细的工具执行状态面板
-4. 会话历史与项目记忆
-5. 更强的 UI 组件化
+## 开发说明
 
-## 不建议现在做的事
+```bash
+npm run check
+```
 
-- 一上来就 1:1 复刻全部 Ink 组件
-- 一上来就设计完整命令系统之外的所有模式
-- 一上来就做多 agent
-- 一上来就接 LSP
-
-这些很容易让项目重新变重。
-
-## 我对这个仓库的判断
-
-如果我们目标是做一个“可理解、可扩展、能自己掌控”的 coding agent，小而稳的路径会比一次性复刻大系统更靠谱。
+MiniCode 有意保持小而实用。目标是让整体架构足够清晰、易改造、易扩展。

@@ -8,9 +8,9 @@ import {
 import { loadHistoryEntries, saveHistoryEntries } from './history.js'
 import { parseLocalToolShortcut } from './local-tool-shortcuts.js'
 import {
-  PermissionDecision,
   PermissionManager,
   PermissionRequest,
+  PermissionPromptResult,
 } from './permissions.js'
 import { buildSystemPrompt } from './prompt.js'
 import { parseInputChunk, type ParsedInputEvent } from './tui/input-parser.js'
@@ -45,7 +45,9 @@ type TtyAppArgs = {
 
 type PendingApproval = {
   request: PermissionRequest
-  resolve: (decision: PermissionDecision) => void
+  resolve: (result: PermissionPromptResult) => void
+  feedbackMode: boolean
+  feedbackInput: string
 }
 
 type ScreenState = {
@@ -208,7 +210,12 @@ function renderScreen(args: TtyAppArgs, state: ScreenState): void {
 
   if (state.pendingApproval) {
     console.log('')
-    console.log(renderPermissionPrompt(state.pendingApproval.request))
+    console.log(
+      renderPermissionPrompt(state.pendingApproval.request, {
+        mode: state.pendingApproval.feedbackMode,
+        input: state.pendingApproval.feedbackInput,
+      }),
+    )
   }
 
   console.log('')
@@ -333,6 +340,7 @@ async function handleInput(
 
   const pendingToolEntries = new Map<string, number[]>()
 
+  args.permissions.beginTurn()
   try {
     const nextMessages = await runAgentTurn({
       model: args.model,
@@ -398,6 +406,8 @@ async function handleInput(
       body: `请求失败: ${message}`,
     })
     state.transcriptScrollOffset = 0
+  } finally {
+    args.permissions.endTurn()
   }
 
   state.status = null
@@ -407,10 +417,15 @@ async function handleInput(
 function createPermissionPromptHandler(
   state: ScreenState,
   rerender: () => void,
-): (request: PermissionRequest) => Promise<PermissionDecision> {
+): (request: PermissionRequest) => Promise<PermissionPromptResult> {
   return request =>
     new Promise(resolve => {
-      state.pendingApproval = { request, resolve }
+      state.pendingApproval = {
+        request,
+        resolve,
+        feedbackMode: false,
+        feedbackInput: '',
+      }
       state.status = 'Waiting for approval...'
       rerender()
     })
@@ -479,25 +494,65 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
     const handleEvent = async (event: ParsedInputEvent) => {
       try {
         if (state.pendingApproval) {
+          const pending = state.pendingApproval
+
+          // Feedback sub-mode: capture free text to hand back to the model.
+          if (pending.feedbackMode) {
+            if (event.kind === 'key' && event.name === 'escape') {
+              pending.feedbackMode = false
+              pending.feedbackInput = ''
+              renderScreen(permissionArgs, state)
+              return
+            }
+
+            if (event.kind === 'key' && event.name === 'return') {
+              const feedback = pending.feedbackInput.trim()
+              state.pendingApproval = null
+              state.status = null
+              pending.resolve({ decision: 'deny_with_feedback', feedback })
+              renderScreen(permissionArgs, state)
+              return
+            }
+
+            if (event.kind === 'key' && event.name === 'backspace') {
+              if (pending.feedbackInput.length > 0) {
+                pending.feedbackInput = pending.feedbackInput.slice(0, -1)
+                renderScreen(permissionArgs, state)
+              }
+              return
+            }
+
+            if (event.kind === 'text' && !event.ctrl && !event.meta) {
+              pending.feedbackInput += event.text
+              renderScreen(permissionArgs, state)
+            }
+
+            return
+          }
+
           const keyChar = event.kind === 'text' && !event.ctrl && !event.meta ? event.text : ''
-          const choice = state.pendingApproval.request.choices.find(
-            item => item.key === keyChar,
-          )
+          const choice = pending.request.choices.find(item => item.key === keyChar)
 
           if (choice) {
-            const pending = state.pendingApproval
+            // Defer denials-with-feedback to the text capture sub-mode.
+            if (choice.decision === 'deny_with_feedback') {
+              pending.feedbackMode = true
+              pending.feedbackInput = ''
+              renderScreen(permissionArgs, state)
+              return
+            }
+
             state.pendingApproval = null
             state.status = null
-            pending.resolve(choice.decision)
+            pending.resolve({ decision: choice.decision })
             renderScreen(permissionArgs, state)
             return
           }
 
           if (event.kind === 'key' && (event.name === 'escape' || event.name === 'return')) {
-            const pending = state.pendingApproval
             state.pendingApproval = null
             state.status = null
-            pending.resolve('deny_once')
+            pending.resolve({ decision: 'deny_once' })
             renderScreen(permissionArgs, state)
             return
           }

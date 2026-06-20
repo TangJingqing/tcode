@@ -121,12 +121,27 @@ export function renderSlashMenu(
   ].join('\n')
 }
 
-export function renderPermissionPrompt(request: PermissionRequest): string {
-  return [
+export function renderPermissionPrompt(
+  request: PermissionRequest,
+  feedback?: { mode: boolean; input: string },
+): string {
+  const lines = [
     `${YELLOW}${BOLD}Approval Required${RESET}`,
     `${BOLD}${request.summary}${RESET}`,
     ...request.details,
     '',
+  ]
+
+  if (feedback?.mode) {
+    lines.push(
+      `${BOLD}Guidance for the model${RESET} ${DIM}(Enter to send, Esc to cancel)${RESET}`,
+      `${CYAN}> ${RESET}${feedback.input}`,
+    )
+    return lines.join('\n')
+  }
+
+  lines.push(
     ...request.choices.map(choice => `${BOLD}${choice.key}${RESET} ${choice.label}`),
-  ].join('\n')
+  )
+  return lines.join('\n')
 }

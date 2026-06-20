@@ -112,6 +112,7 @@ async function main(): Promise<void> {
       content: await buildSystemPrompt(process.cwd(), permissions.getSummary()),
     }
     messages = [...messages, { role: 'user', content: input }]
+    permissions.beginTurn()
     try {
       messages = await runAgentTurn({
         model,
@@ -131,6 +132,8 @@ async function main(): Promise<void> {
           content: `请求失败: ${message}`,
         },
       ]
+    } finally {
+      permissions.endTurn()
     }
 
     const lastAssistant = [...messages]
