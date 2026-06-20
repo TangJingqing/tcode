@@ -18,6 +18,7 @@ import {
   clearScreen,
   enterAlternateScreen,
   exitAlternateScreen,
+  getPermissionPromptMaxScrollOffset,
   hideCursor,
   renderBanner,
   renderInputPrompt,
@@ -46,6 +47,8 @@ type TtyAppArgs = {
 type PendingApproval = {
   request: PermissionRequest
   resolve: (result: PermissionPromptResult) => void
+  detailsExpanded: boolean
+  detailsScrollOffset: number
   feedbackMode: boolean
   feedbackInput: string
 }
@@ -169,18 +172,150 @@ function updateToolEntry(
 
   entry.status = status
   entry.body = body
+  entry.collapsed = false
+  entry.collapsedSummary = undefined
+  entry.collapsePhase = undefined
 }
 
-function summarizeToolInput(input: unknown): string {
+function setToolEntryCollapsePhase(
+  state: ScreenState,
+  entryId: number,
+  phase: 1 | 2 | 3,
+): void {
+  const entry = state.transcript.find(
+    item => item.id === entryId && item.kind === 'tool',
+  )
+  if (!entry || entry.kind !== 'tool' || entry.status === 'running') {
+    return
+  }
+  entry.collapsePhase = phase
+}
+
+function collapseToolEntry(
+  state: ScreenState,
+  entryId: number,
+  summary: string,
+): void {
+  const entry = state.transcript.find(
+    item => item.id === entryId && item.kind === 'tool',
+  )
+  if (!entry || entry.kind !== 'tool' || entry.status === 'running') {
+    return
+  }
+  entry.collapsePhase = undefined
+  entry.collapsed = true
+  entry.collapsedSummary = summary
+}
+
+function summarizeCollapsedToolBody(output: string): string {
+  const line = output
+    .split('\n')
+    .map(item => item.trim())
+    .find(Boolean)
+  if (!line) {
+    return 'output collapsed'
+  }
+  if (line.length > 140) {
+    return `${line.slice(0, 140)}...`
+  }
+  return line
+}
+
+function scheduleToolAutoCollapse(
+  state: ScreenState,
+  entryId: number,
+  output: string,
+  rerender: () => void,
+): void {
+  const summary = summarizeCollapsedToolBody(output)
+  const frames: Array<1 | 2> = [1, 2]
+  frames.forEach((phase, idx) => {
+    setTimeout(() => {
+      setToolEntryCollapsePhase(state, entryId, phase)
+      rerender()
+    }, 110 * (idx + 1))
+  })
+  setTimeout(() => {
+    collapseToolEntry(state, entryId, summary)
+    rerender()
+  }, 320)
+}
+
+function truncateForDisplay(text: string, max = 180): string {
+  if (text.length <= max) return text
+  return `${text.slice(0, max)}...`
+}
+
+function summarizeToolInput(toolName: string, input: unknown): string {
   if (typeof input === 'string') {
-    return input
+    return truncateForDisplay(input.replace(/\s+/g, ' ').trim())
+  }
+
+  if (typeof input === 'object' && input !== null) {
+    const maybePath = (input as { path?: unknown }).path
+    const pathPart =
+      typeof maybePath === 'string' && maybePath.trim()
+        ? ` path=${maybePath}`
+        : ''
+
+    if (toolName === 'patch_file') {
+      const count = Array.isArray((input as { replacements?: unknown }).replacements)
+        ? (input as { replacements: unknown[] }).replacements.length
+        : 0
+      return `patch_file${pathPart} replacements=${count}`
+    }
+
+    if (toolName === 'edit_file') {
+      return `edit_file${pathPart}`
+    }
+
+    if (toolName === 'read_file') {
+      const offset = (input as { offset?: unknown }).offset
+      const limit = (input as { limit?: unknown }).limit
+      return `read_file${pathPart}${offset !== undefined ? ` offset=${String(offset)}` : ''}${limit !== undefined ? ` limit=${String(limit)}` : ''}`
+    }
+
+    if (toolName === 'run_command') {
+      const command = (input as { command?: unknown }).command
+      return `run_command${typeof command === 'string' ? ` ${truncateForDisplay(command, 120)}` : ''}`
+    }
   }
 
   try {
-    return JSON.stringify(input, null, 2)
+    return truncateForDisplay(JSON.stringify(input))
   } catch {
-    return String(input)
+    return truncateForDisplay(String(input))
   }
+}
+
+type AggregatedEditProgress = {
+  entryId: number
+  toolName: string
+  path: string
+  total: number
+  completed: number
+  errors: number
+  lastOutput: string
+}
+
+function isFileEditTool(toolName: string): boolean {
+  return (
+    toolName === 'edit_file' ||
+    toolName === 'patch_file' ||
+    toolName === 'modify_file' ||
+    toolName === 'write_file'
+  )
+}
+
+function extractPathFromToolInput(input: unknown): string | null {
+  if (typeof input !== 'object' || input === null) {
+    return null
+  }
+  if (!('path' in input)) {
+    return null
+  }
+  const value = (input as { path?: unknown }).path
+  return typeof value === 'string' && value.trim() ? value : null
 }
 
 function renderScreen(args: TtyAppArgs, state: ScreenState): void {
@@ -212,8 +347,10 @@ function renderScreen(args: TtyAppArgs, state: ScreenState): void {
     console.log('')
     console.log(
       renderPermissionPrompt(state.pendingApproval.request, {
-        mode: state.pendingApproval.feedbackMode,
-        input: state.pendingApproval.feedbackInput,
+        expanded: state.pendingApproval.detailsExpanded,
+        scrollOffset: state.pendingApproval.detailsScrollOffset,
+        feedbackMode: state.pendingApproval.feedbackMode,
+        feedbackInput: state.pendingApproval.feedbackInput,
       }),
     )
   }
@@ -244,7 +381,7 @@ async function executeToolShortcut(
     kind: 'tool',
     toolName,
     status: 'running',
-    body: summarizeToolInput(input),
+    body: summarizeToolInput(toolName, input),
   })
   rerender()
 
@@ -262,6 +399,13 @@ async function executeToolShortcut(
     entryId,
     result.ok ? 'success' : 'error',
     result.ok ? result.output : `ERROR: ${result.output}`,
+  )
+  collapseToolEntry(
+    state,
+    entryId,
+    summarizeCollapsedToolBody(
+      result.ok ? result.output : `ERROR: ${result.output}`,
+    ),
   )
   state.activeTool = null
   state.status = null
@@ -339,6 +483,8 @@ async function handleInput(
   rerender()
 
   const pendingToolEntries = new Map<string, number[]>()
+  const aggregatedEditByEntryId = new Map<number, AggregatedEditProgress>()
+  const aggregatedEditByKey = new Map<string, AggregatedEditProgress>()
 
   args.permissions.beginTurn()
   try {
@@ -360,11 +506,60 @@ async function handleInput(
       onToolStart(toolName, toolInput) {
         state.status = `Running ${toolName}...`
         state.activeTool = toolName
+
+        // Aggregate repeated edits to the same file into one progress entry.
+        const editPath = isFileEditTool(toolName)
+          ? extractPathFromToolInput(toolInput)
+          : null
+        if (editPath) {
+          const key = `${toolName}:${editPath}`
+          const existing = aggregatedEditByKey.get(key)
+          if (existing) {
+            existing.total += 1
+            const queue = pendingToolEntries.get(toolName) ?? []
+            queue.push(existing.entryId)
+            pendingToolEntries.set(toolName, queue)
+            updateToolEntry(
+              state,
+              existing.entryId,
+              'running',
+              `Aggregated ${toolName} for ${existing.path}\nCompleted: ${existing.completed}/${existing.total}`,
+            )
+            state.transcriptScrollOffset = 0
+            rerender()
+            return
+          }
+
+          const entryId = pushTranscriptEntry(state, {
+            kind: 'tool',
+            toolName,
+            status: 'running',
+            body: summarizeToolInput(toolName, toolInput),
+          })
+          const aggregated: AggregatedEditProgress = {
+            entryId,
+            toolName,
+            path: editPath,
+            total: 1,
+            completed: 0,
+            errors: 0,
+            lastOutput: '',
+          }
+          aggregatedEditByEntryId.set(entryId, aggregated)
+          aggregatedEditByKey.set(key, aggregated)
+          const queue = pendingToolEntries.get(toolName) ?? []
+          queue.push(entryId)
+          pendingToolEntries.set(toolName, queue)
+          state.transcriptScrollOffset = 0
+          rerender()
+          return
+        }
+
         const entryId = pushTranscriptEntry(state, {
           kind: 'tool',
           toolName,
           status: 'running',
-          body: summarizeToolInput(toolInput),
+          body: summarizeToolInput(toolName, toolInput),
         })
         const pending = pendingToolEntries.get(toolName) ?? []
         pending.push(entryId)
@@ -373,21 +568,68 @@ async function handleInput(
         rerender()
       },
       onToolResult(toolName, output, isError) {
-        state.recentTools.push({
-          name: toolName,
-          status: isError ? 'error' : 'success',
-        })
         const pending = pendingToolEntries.get(toolName) ?? []
         const entryId = pending.shift()
         pendingToolEntries.set(toolName, pending)
-        if (entryId !== undefined) {
+
+        if (entryId === undefined) {
+          state.recentTools.push({
+            name: toolName,
+            status: isError ? 'error' : 'success',
+          })
+          state.activeTool = null
+          state.status = 'Thinking...'
+          rerender()
+          return
+        }
+
+        const aggregated = aggregatedEditByEntryId.get(entryId)
+        if (aggregated && aggregated.toolName === toolName) {
+          aggregated.completed += 1
+          if (isError) {
+            aggregated.errors += 1
+          }
+          aggregated.lastOutput = output
+          const done = aggregated.completed >= aggregated.total
+          if (done) {
+            state.recentTools.push({
+              name: `${toolName} x${aggregated.total}`,
+              status: aggregated.errors > 0 ? 'error' : 'success',
+            })
+          }
+          const aggregatedBody = done
+            ? [
+                `Aggregated ${toolName} for ${aggregated.path}`,
+                `Operations: ${aggregated.total}, errors: ${aggregated.errors}`,
+                `Last result: ${aggregated.lastOutput}`,
+              ].join('\n')
+            : `Aggregated ${toolName} for ${aggregated.path}\nCompleted: ${aggregated.completed}/${aggregated.total}`
+          updateToolEntry(
+            state,
+            entryId,
+            aggregated.errors > 0 ? 'error' : done ? 'success' : 'running',
+            aggregatedBody,
+          )
+          if (done) {
+            scheduleToolAutoCollapse(state, entryId, aggregatedBody, rerender)
+            aggregatedEditByEntryId.delete(entryId)
+            aggregatedEditByKey.delete(`${toolName}:${aggregated.path}`)
+          }
+        } else {
+          state.recentTools.push({
+            name: toolName,
+            status: isError ? 'error' : 'success',
+          })
+          const body = isError ? `ERROR: ${output}` : output
           updateToolEntry(
             state,
             entryId,
             isError ? 'error' : 'success',
-            isError ? `ERROR: ${output}` : output,
+            body,
           )
+          scheduleToolAutoCollapse(state, entryId, body, rerender)
         }
+
         state.activeTool = null
         state.status = 'Thinking...'
         rerender()
@@ -423,6 +665,8 @@ function createPermissionPromptHandler(
       state.pendingApproval = {
         request,
         resolve,
+        detailsExpanded: false,
+        detailsScrollOffset: 0,
         feedbackMode: false,
         feedbackInput: '',
       }
@@ -528,6 +772,46 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
             }
 
             return
+          }
+
+          // Ctrl+O toggles the full diff view (edit requests only).
+          if (event.kind === 'text' && event.ctrl && event.text === 'o') {
+            if (pending.request.kind === 'edit') {
+              pending.detailsExpanded = !pending.detailsExpanded
+              pending.detailsScrollOffset = 0
+              renderScreen(permissionArgs, state)
+            }
+            return
+          }
+
+          // Scroll the expanded diff with wheel / PgUp / PgDn.
+          if (pending.detailsExpanded) {
+            const scrollBy = (delta: number): void => {
+              const maxOffset = getPermissionPromptMaxScrollOffset(pending.request, {
+                expanded: true,
+              })
+              const next = Math.max(
+                0,
+                Math.min(maxOffset, pending.detailsScrollOffset + delta),
+              )
+              if (next !== pending.detailsScrollOffset) {
+                pending.detailsScrollOffset = next
+                renderScreen(permissionArgs, state)
+              }
+            }
+
+            if (event.kind === 'wheel') {
+              scrollBy(event.direction === 'up' ? -3 : 3)
+              return
+            }
+            if (event.kind === 'key' && event.name === 'pageup') {
+              scrollBy(-8)
+              return
+            }
+            if (event.kind === 'key' && event.name === 'pagedown') {
+              scrollBy(8)
+              return
+            }
           }
 
           const keyChar = event.kind === 'text' && !event.ctrl && !event.meta ? event.text : ''

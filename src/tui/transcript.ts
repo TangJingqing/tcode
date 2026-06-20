@@ -58,7 +58,11 @@ function renderTranscriptEntry(entry: TranscriptEntry): string {
   const body =
     entry.status === 'running'
       ? entry.body
-      : previewToolBody(entry.toolName, renderMarkdownish(entry.body))
+      : entry.collapsed
+        ? `${DIM}${entry.collapsedSummary ?? 'output collapsed'}${RESET}`
+        : entry.collapsePhase
+          ? `${DIM}collapsing${'.'.repeat(entry.collapsePhase)}${RESET}`
+          : previewToolBody(entry.toolName, renderMarkdownish(entry.body))
 
   return `${MAGENTA}${BOLD}Tool${RESET} ${entry.toolName} ${status}\n${indentBlock(body)}`
 }

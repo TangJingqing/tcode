@@ -42,6 +42,7 @@ const CTRL_CHAR_TO_NAME: Record<string, string> = {
   '\u0003': 'c',
   '\u0005': 'e',
   '\u000e': 'n',
+  '\u000f': 'o',
   '\u0010': 'p',
   '\u0015': 'u',
 }

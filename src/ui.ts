@@ -2,6 +2,7 @@ export {
   clearScreen,
   enterAlternateScreen,
   exitAlternateScreen,
+  getPermissionPromptMaxScrollOffset,
   getTranscriptMaxScrollOffset,
   getTranscriptWindowSize,
   hideCursor,

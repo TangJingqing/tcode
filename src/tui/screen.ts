@@ -28,5 +28,6 @@ export function exitAlternateScreen(): void {
 }
 
 export function clearScreen(): void {
-  process.stdout.write('\u001b[2J\u001b[H')
+  // Softer redraw than full clear to reduce visible flicker.
+  process.stdout.write('\u001b[H\u001b[J')
 }

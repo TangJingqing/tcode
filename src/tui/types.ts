@@ -15,4 +15,7 @@ export type TranscriptEntry =
       toolName: string
       status: 'running' | 'success' | 'error'
       body: string
+      collapsed?: boolean
+      collapsedSummary?: string
+      collapsePhase?: 1 | 2 | 3
     }
