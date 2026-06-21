@@ -12,12 +12,17 @@ const ALLOWLIST = new Set([
   'find',
   'rg',
   'cat',
+  'echo',
+  'env',
+  'grep',
   'git',
   'npm',
   'node',
   'python3',
   'pytest',
   'bun',
+  'bash',
+  'sh',
   'sed',
   'head',
   'tail',
@@ -30,9 +35,19 @@ type Input = {
   cwd?: string
 }
 
+// 当 command 内含管道/重定向/变量展开等 shell 语法且未单独传 args 时，走 bash -lc。
+function looksLikeShellSnippet(command: string, args?: string[]): boolean {
+  if ((args?.length ?? 0) > 0) {
+    return false
+  }
+
+  return /[|&;<>()$`]/.test(command)
+}
+
 export const runCommandTool: ToolDefinition<Input> = {
   name: 'run_command',
-  description: 'Run a common development command from an allowlist.',
+  description:
+    'Run a common development command from an allowlist. For shell pipelines or variable expansion, pass the full snippet in command and tcode will run it via bash -lc.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -51,26 +66,28 @@ export const runCommandTool: ToolDefinition<Input> = {
     cwd: z.string().optional(),
   }),
   async run(input, context) {
-    if (!ALLOWLIST.has(input.command)) {
+    const effectiveCwd = input.cwd
+      ? await resolveToolPath(context, input.cwd, 'list')
+      : context.cwd
+
+    const useShell = looksLikeShellSnippet(input.command, input.args)
+
+    if (!useShell && !ALLOWLIST.has(input.command)) {
       return {
         ok: false,
         output: `Command not allowed: ${input.command}`,
       }
     }
 
-    const effectiveCwd = input.cwd
-      ? await resolveToolPath(context, input.cwd, 'list')
-      : context.cwd
+    const command = useShell ? 'bash' : input.command
+    const args = useShell ? ['-lc', input.command] : (input.args ?? [])
 
-    await context.permissions?.ensureCommand(
-      input.command,
-      input.args ?? [],
-      effectiveCwd,
-    )
+    await context.permissions?.ensureCommand(command, args, effectiveCwd)
 
-    const result = await execFileAsync(input.command, input.args ?? [], {
+    const result = await execFileAsync(command, args, {
       cwd: effectiveCwd,
       maxBuffer: 1024 * 1024,
+      env: process.env,
     })
 
     return {

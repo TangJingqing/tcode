@@ -74,6 +74,7 @@ type ScreenState = {
 type TranscriptEntryDraft =
   | Omit<Extract<TranscriptEntry, { kind: 'user' }>, 'id'>
   | Omit<Extract<TranscriptEntry, { kind: 'assistant' }>, 'id'>
+  | Omit<Extract<TranscriptEntry, { kind: 'progress' }>, 'id'>
   | Omit<Extract<TranscriptEntry, { kind: 'tool' }>, 'id'>
 
 function getMaxTranscriptScrollOffset(state: ScreenState): number {
@@ -442,7 +443,7 @@ async function handleInput(
     return false
   }
 
-  const localCommandResult = await tryHandleLocalCommand(input)
+  const localCommandResult = await tryHandleLocalCommand(input, { tools: args.tools })
   if (localCommandResult !== null) {
     pushTranscriptEntry(state, {
       kind: 'assistant',
@@ -501,6 +502,14 @@ async function handleInput(
       onAssistantMessage(content) {
         pushTranscriptEntry(state, {
           kind: 'assistant',
+          body: content,
+        })
+        state.transcriptScrollOffset = 0
+        rerender()
+      },
+      onProgressMessage(content) {
+        pushTranscriptEntry(state, {
+          kind: 'progress',
           body: content,
         })
         state.transcriptScrollOffset = 0

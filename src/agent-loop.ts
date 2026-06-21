@@ -2,52 +2,6 @@ import type { ToolRegistry } from './tool.js'
 import type { ChatMessage, ModelAdapter } from './types.js'
 import type { PermissionManager } from './permissions.js'
 
-function isUserTextMessage(
-  message: ChatMessage,
-): message is Extract<ChatMessage, { role: 'user' }> {
-  return message.role === 'user'
-}
-
-function userRequestedAction(messages: ChatMessage[]): boolean {
-  const lastUser = [...messages]
-    .reverse()
-    .find(
-      (message): message is Extract<ChatMessage, { role: 'user' }> =>
-        isUserTextMessage(message) &&
-        !message.content.startsWith('Continue immediately with tool use.'),
-    )
-
-  if (!lastUser) return false
-
-  const text = lastUser.content.trim().toLowerCase()
-  if (!text) return false
-
-  const actionHints = [
-    '改',
-    '修改',
-    '优化',
-    '生成',
-    '创建',
-    '实现',
-    '完善',
-    '修复',
-    '做一个',
-    '写一个',
-    'build',
-    'create',
-    'edit',
-    'update',
-    'modify',
-    'fix',
-    'implement',
-    'improve',
-    'optimize',
-    'generate',
-  ]
-
-  return actionHints.some(hint => text.includes(hint))
-}
-
 function looksLikeClarifyingQuestion(content: string): boolean {
   const trimmed = content.trim()
   if (!trimmed) return false
@@ -99,76 +53,70 @@ function looksLikeClarifyingQuestion(content: string): boolean {
   )
 }
 
-function shouldAutoContinueAssistant(content: string): boolean {
-  const trimmed = content.trim()
-  if (!trimmed) return false
+function isEmptyAssistantResponse(content: string): boolean {
+  return content.trim().length === 0
+}
 
-  const lower = trimmed.toLowerCase()
-  const starters = [
-    "let me ",
-    "i'll ",
-    'i will ',
-    'next, ',
-    'now i will ',
-    '我来',
-    '让我',
-    '接下来我会',
-    '现在我来',
-    '我先',
-  ]
+function shouldTreatAssistantAsProgress(args: {
+  kind?: 'final' | 'progress'
+  content: string
+  sawToolResultThisTurn: boolean
+}): boolean {
+  if (args.kind === 'progress') {
+    return true
+  }
 
-  const actionHints = [
-    '优化',
-    '修改',
-    '创建',
-    '检查',
-    'read',
-    'inspect',
-    'update',
-    'modify',
-    'optimize',
-    'create',
-    'fix',
-  ]
-
-  const planHints = [
-    '我会',
-    '我将',
-    '计划',
-    '步骤',
-    '接下来',
-    '然后',
-    'let me',
-    "i'll",
-    'i will',
-    'plan',
-    'steps',
-    'next',
-    'then',
-  ]
-
-  const hasNumberedPlan =
-    /^\s*1\.\s+/m.test(trimmed) ||
-    /^\s*-\s+/m.test(trimmed) ||
-    /^\s*•\s+/m.test(trimmed)
-
-  const looksLikePreface =
-    trimmed.endsWith(':') ||
-    trimmed.endsWith('：') ||
-    starters.some(prefix => lower.startsWith(prefix) || trimmed.startsWith(prefix))
-
-  const looksLikePlan =
-    hasNumberedPlan || planHints.some(hint => lower.includes(hint) || trimmed.includes(hint))
-
-  if (looksLikeClarifyingQuestion(trimmed)) {
+  if (args.kind === 'final') {
     return false
   }
 
-  if (!looksLikePreface && !looksLikePlan) {
+  if (!args.sawToolResultThisTurn) {
     return false
   }
 
-  return actionHints.some(hint => lower.includes(hint) || trimmed.includes(hint))
+  if (looksLikeClarifyingQuestion(args.content)) {
+    return false
+  }
+
+  return args.content.trim().length > 0
+}
+
+function formatDiagnostics(args: {
+  stopReason?: string
+  blockTypes?: string[]
+  ignoredBlockTypes?: string[]
+}): string {
+  const parts: string[] = []
+
+  if (args.stopReason) {
+    parts.push(`stop_reason=${args.stopReason}`)
+  }
+
+  if ((args.blockTypes?.length ?? 0) > 0) {
+    parts.push(`blocks=${args.blockTypes!.join(',')}`)
+  }
+
+  if ((args.ignoredBlockTypes?.length ?? 0) > 0) {
+    parts.push(`ignored=${args.ignoredBlockTypes!.join(',')}`)
+  }
+
+  return parts.length > 0 ? ` 诊断信息: ${parts.join('; ')}。` : ''
+}
+
+function isRecoverableThinkingStop(args: {
+  isEmpty: boolean
+  stopReason?: string
+  ignoredBlockTypes?: string[]
+}): boolean {
+  if (!args.isEmpty) {
+    return false
+  }
+
+  if (args.stopReason !== 'pause_turn' && args.stopReason !== 'max_tokens') {
+    return false
+  }
+
+  return (args.ignoredBlockTypes ?? []).includes('thinking')
 }
 
 export async function runAgentTurn(args: {
@@ -181,16 +129,111 @@ export async function runAgentTurn(args: {
   onToolStart?: (toolName: string, input: unknown) => void
   onToolResult?: (toolName: string, output: string, isError: boolean) => void
   onAssistantMessage?: (content: string) => void
+  onProgressMessage?: (content: string) => void
 }): Promise<ChatMessage[]> {
   const maxSteps = args.maxSteps ?? 6
   let messages = args.messages
-  let autoContinueCount = 0
+  let emptyResponseRetryCount = 0
+  let recoverableThinkingRetryCount = 0
+  let toolErrorCount = 0
+  let sawToolResultThisTurn = false
+
+  const pushContinuationPrompt = (content: string) => {
+    messages = [
+      ...messages,
+      {
+        role: 'user',
+        content,
+      },
+    ]
+  }
 
   for (let step = 0; step < maxSteps; step++) {
     const next = await args.model.next(messages)
 
     if (next.type === 'assistant') {
-      args.onAssistantMessage?.(next.content)
+      const isEmpty = isEmptyAssistantResponse(next.content)
+      if (
+        !isEmpty &&
+        shouldTreatAssistantAsProgress({
+          kind: next.kind,
+          content: next.content,
+          sawToolResultThisTurn,
+        })
+      ) {
+        args.onProgressMessage?.(next.content)
+        messages = [
+          ...messages,
+          { role: 'assistant_progress', content: next.content },
+        ]
+        pushContinuationPrompt(
+          sawToolResultThisTurn && next.kind !== 'progress'
+            ? 'Continue from your progress update. You have already used tools in this turn, so treat plain status text as progress, not a final answer. Respond with the next concrete tool call, code change, or an explicit <final> answer only if the task is truly complete.'
+            : 'Continue immediately from your <progress> update with concrete tool calls, code changes, or an explicit <final> answer only if the task is complete.',
+        )
+        continue
+      }
+
+      if (
+        isRecoverableThinkingStop({
+          isEmpty,
+          stopReason: next.diagnostics?.stopReason,
+          ignoredBlockTypes: next.diagnostics?.ignoredBlockTypes,
+        }) &&
+        recoverableThinkingRetryCount < 3
+      ) {
+        recoverableThinkingRetryCount += 1
+        const stopReason = next.diagnostics?.stopReason
+        const progressContent =
+          stopReason === 'max_tokens'
+            ? '模型在 thinking 阶段触发 max_tokens，正在继续请求后续步骤...'
+            : '模型返回 pause_turn，正在继续请求后续步骤...'
+        args.onProgressMessage?.(progressContent)
+        messages = [
+          ...messages,
+          { role: 'assistant_progress', content: progressContent },
+        ]
+        pushContinuationPrompt(
+          stopReason === 'max_tokens'
+            ? 'Your previous response hit max_tokens during thinking before producing the next actionable step. Resume immediately and continue with the next concrete tool call, code change, or an explicit <final> answer only if the task is complete. Do not repeat the earlier plan.'
+            : 'Resume from the previous pause_turn and continue the task immediately. Produce the next concrete tool call, code change, or an explicit <final> answer only if the task is complete.',
+        )
+        continue
+      }
+
+      if (isEmpty && emptyResponseRetryCount < 2) {
+        emptyResponseRetryCount += 1
+        pushContinuationPrompt(
+          sawToolResultThisTurn
+            ? 'Your last response was empty after recent tool results. Continue immediately by trying the next concrete step, adapting to any tool errors, or giving an explicit <final> answer only if the task is complete.'
+            : 'Your last response was empty. Continue immediately with concrete tool calls, code changes, or an explicit <final> answer only if the task is complete.',
+        )
+        continue
+      }
+
+      if (isEmpty) {
+        const diagnosticsSuffix = formatDiagnostics({
+          stopReason: next.diagnostics?.stopReason,
+          blockTypes: next.diagnostics?.blockTypes,
+          ignoredBlockTypes: next.diagnostics?.ignoredBlockTypes,
+        })
+        const fallbackContent =
+          sawToolResultThisTurn
+            ? toolErrorCount > 0
+              ? `工具执行后模型返回空响应，已停止当前回合。最近有 ${toolErrorCount} 个工具报错；请重试、调整命令，或让模型改用其他方案。${diagnosticsSuffix}`
+              : `工具执行后模型返回空响应，已停止当前回合。请重试，或要求模型继续完成剩余步骤。${diagnosticsSuffix}`
+            : `模型返回空响应，已停止当前回合。请重试，或要求模型继续。${diagnosticsSuffix}`
+
+        args.onAssistantMessage?.(fallbackContent)
+        return [
+          ...messages,
+          {
+            role: 'assistant',
+            content: fallbackContent,
+          },
+        ]
+      }
+
       const assistantMessage: ChatMessage = {
         role: 'assistant',
         content: next.content,
@@ -200,21 +243,8 @@ export async function runAgentTurn(args: {
         assistantMessage,
       ]
 
-      if (
-        autoContinueCount < 2 &&
-        userRequestedAction(messages) &&
-        shouldAutoContinueAssistant(next.content)
-      ) {
-        autoContinueCount += 1
-        messages = [
-          ...withAssistant,
-          <ChatMessage>{
-            role: 'user',
-            content:
-              'Continue immediately with tool use. The user asked you to act, so do not stop at a preface, plan, or recommendation list. Inspect files, edit files, run tools, and only summarize after you have actually started the work.',
-          },
-        ]
-        continue
+      if (!isEmpty) {
+        args.onAssistantMessage?.(next.content)
       }
 
       return withAssistant
@@ -229,11 +259,22 @@ export async function runAgentTurn(args: {
     }
 
     if (next.content) {
-      args.onAssistantMessage?.(next.content)
-      messages = [
-        ...messages,
-        { role: 'assistant', content: next.content },
-      ]
+      if (next.contentKind === 'progress') {
+        args.onProgressMessage?.(next.content)
+        messages = [
+          ...messages,
+          { role: 'assistant_progress', content: next.content },
+        ]
+        pushContinuationPrompt(
+          'Continue immediately from your <progress> update with concrete tool calls, code changes, or an explicit <final> answer only if the task is complete.',
+        )
+      } else {
+        args.onAssistantMessage?.(next.content)
+        messages = [
+          ...messages,
+          { role: 'assistant', content: next.content },
+        ]
+      }
     }
 
     for (const call of next.calls) {
@@ -243,6 +284,10 @@ export async function runAgentTurn(args: {
         call.input,
         { cwd: args.cwd, permissions: args.permissions },
       )
+      sawToolResultThisTurn = true
+      if (!result.ok) {
+        toolErrorCount += 1
+      }
       args.onToolResult?.(call.toolName, result.output, !result.ok)
 
       messages = [
@@ -264,11 +309,13 @@ export async function runAgentTurn(args: {
     }
   }
 
+  const maxStepContent = `达到最大工具步数限制，已停止当前回合。`
+  args.onAssistantMessage?.(maxStepContent)
   return [
     ...messages,
     {
       role: 'assistant',
-      content: `达到最大工具步数限制，已停止当前回合。`,
+      content: maxStepContent,
     },
   ]
 }

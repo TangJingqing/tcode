@@ -7,6 +7,7 @@ import {
   tryHandleLocalCommand,
 } from './cli-commands.js'
 import { loadRuntimeConfig } from './config.js'
+import { maybeHandleManagementCommand } from './manage-cli.js'
 import { MockModelAdapter } from './mock-model.js'
 import { PermissionManager } from './permissions.js'
 import { buildSystemPrompt } from './prompt.js'
@@ -18,6 +19,12 @@ import { runAgentTurn } from './agent-loop.js'
 
 async function main(): Promise<void> {
   const isInteractiveTerminal = Boolean(process.stdin.isTTY && process.stdout.isTTY)
+
+  const argv = process.argv.slice(2)
+  if (await maybeHandleManagementCommand(process.cwd(), argv)) {
+    return
+  }
+
   let runtime = null
   try {
     runtime = await loadRuntimeConfig()
@@ -25,7 +32,10 @@ async function main(): Promise<void> {
     runtime = null
   }
 
-  const tools = createDefaultToolRegistry()
+  const tools = await createDefaultToolRegistry({
+    cwd: process.cwd(),
+    runtime,
+  })
   const permissions = new PermissionManager(process.cwd())
   await permissions.whenReady()
   const model =
@@ -35,122 +45,120 @@ async function main(): Promise<void> {
   let messages: ChatMessage[] = [
     {
       role: 'system',
-      content: await buildSystemPrompt(process.cwd(), permissions.getSummary()),
+      content: await buildSystemPrompt(process.cwd(), permissions.getSummary(), {
+        skills: tools.getSkills(),
+        mcpServers: tools.getMcpServers(),
+      }),
     },
   ]
 
-  if (isInteractiveTerminal) {
-    await runTtyApp({
-      runtime,
-      tools,
-      model,
-      messages,
-      cwd: process.cwd(),
-      permissions,
-    })
-    return
-  }
-
-  console.log(renderBanner(runtime, process.cwd(), permissions.getSummary()))
-  console.log('')
-
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    completer: completeSlashCommand,
-  })
-
-  if (isInteractiveTerminal) {
-    rl.setPrompt('tcode> ')
-    rl.prompt()
-  }
-
-  for await (const rawInput of rl) {
-    const input = rawInput.trim()
-    if (!input) {
-      if (isInteractiveTerminal) rl.prompt()
-      continue
-    }
-    if (input === '/exit') break
-
-    try {
-      if (input === '/tools') {
-        console.log(
-          `\n${tools.list().map(tool => `${tool.name}: ${tool.description}`).join('\n')}\n`,
-        )
-        if (isInteractiveTerminal) rl.prompt()
-        continue
-      }
-
-      const localCommandResult = await tryHandleLocalCommand(input)
-      if (localCommandResult !== null) {
-        console.log(`\n${localCommandResult}\n`)
-        if (isInteractiveTerminal) rl.prompt()
-        continue
-      }
-
-      if (input.startsWith('/')) {
-        const matches = findMatchingSlashCommands(input)
-        if (matches.length > 0) {
-          console.log(`\n未识别命令。你是不是想输入：\n${matches.join('\n')}\n`)
-        } else {
-          console.log(`\n未识别命令。输入 /help 查看可用命令。\n`)
-        }
-        if (isInteractiveTerminal) rl.prompt()
-        continue
-      }
-    } catch (error) {
-      console.log(
-        `\n${error instanceof Error ? error.message : String(error)}\n`,
-      )
-      if (isInteractiveTerminal) rl.prompt()
-      continue
-    }
-
-    messages[0] = {
-      role: 'system',
-      content: await buildSystemPrompt(process.cwd(), permissions.getSummary()),
-    }
-    messages = [...messages, { role: 'user', content: input }]
-    permissions.beginTurn()
-    try {
-      messages = await runAgentTurn({
-        model,
+  try {
+    if (isInteractiveTerminal) {
+      await runTtyApp({
+        runtime,
         tools,
+        model,
         messages,
         cwd: process.cwd(),
         permissions,
-        maxSteps: 8,
       })
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : String(error)
-      messages = [
-        ...messages,
-        {
-          role: 'assistant',
-          content: `请求失败: ${message}`,
-        },
-      ]
-    } finally {
-      permissions.endTurn()
+      return
     }
 
-    const lastAssistant = [...messages]
-      .reverse()
-      .find(message => message.role === 'assistant')
+    console.log(renderBanner(runtime, process.cwd(), permissions.getSummary()))
+    console.log('')
 
-    if (lastAssistant?.role === 'assistant') {
-      console.log(`\n${lastAssistant.content}\n`)
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      completer: completeSlashCommand,
+    })
+
+    for await (const rawInput of rl) {
+      const input = rawInput.trim()
+      if (!input) {
+        continue
+      }
+      if (input === '/exit') break
+
+      try {
+        if (input === '/tools') {
+          console.log(
+            `\n${tools.list().map(tool => `${tool.name}: ${tool.description}`).join('\n')}\n`,
+          )
+          continue
+        }
+
+        const localCommandResult = await tryHandleLocalCommand(input, { tools })
+        if (localCommandResult !== null) {
+          console.log(`\n${localCommandResult}\n`)
+          continue
+        }
+
+        if (input.startsWith('/')) {
+          const matches = findMatchingSlashCommands(input)
+          if (matches.length > 0) {
+            console.log(`\n未识别命令。你是不是想输入：\n${matches.join('\n')}\n`)
+          } else {
+            console.log(`\n未识别命令。输入 /help 查看可用命令。\n`)
+          }
+          continue
+        }
+      } catch (error) {
+        console.log(
+          `\n${error instanceof Error ? error.message : String(error)}\n`,
+        )
+        continue
+      }
+
+      messages[0] = {
+        role: 'system',
+        content: await buildSystemPrompt(process.cwd(), permissions.getSummary(), {
+          skills: tools.getSkills(),
+          mcpServers: tools.getMcpServers(),
+        }),
+      }
+      messages = [...messages, { role: 'user', content: input }]
+      permissions.beginTurn()
+      try {
+        messages = await runAgentTurn({
+          model,
+          tools,
+          messages,
+          cwd: process.cwd(),
+          permissions,
+          maxSteps: 8,
+        })
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : String(error)
+        messages = [
+          ...messages,
+          {
+            role: 'assistant',
+            content: `请求失败: ${message}`,
+          },
+        ]
+      } finally {
+        permissions.endTurn()
+      }
+
+      const lastAssistant = [...messages]
+        .reverse()
+        .find(message => message.role === 'assistant')
+
+      if (lastAssistant?.role === 'assistant') {
+        console.log(`\n${lastAssistant.content}\n`)
+      }
     }
 
-    if (isInteractiveTerminal) rl.prompt()
-  }
-
-  try {
-    rl.close()
-  } catch {
-    // 在输入结束的收尾阶段忽略重复关闭。
+    try {
+      rl.close()
+    } catch {
+      // 在输入结束的收尾阶段忽略重复关闭。
+    }
+  } finally {
+    await tools.dispose()
   }
 }
 
