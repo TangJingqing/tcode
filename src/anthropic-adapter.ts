@@ -150,7 +150,13 @@ export class AnthropicModelAdapter implements ModelAdapter {
     private readonly getRuntimeConfig: () => Promise<RuntimeConfig>,
   ) {}
 
-  async next(messages: ChatMessage[]) {
+  async next(
+    messages: ChatMessage[],
+    context?: {
+      tracer?: import('./tracing.js').AgentTracer
+      stepIndex?: number
+    },
+  ) {
     const runtime = await this.getRuntimeConfig()
     const payload = toAnthropicMessages(messages)
     const url = `${runtime.baseUrl.replace(/\/$/, '')}/v1/messages`
@@ -178,17 +184,59 @@ export class AnthropicModelAdapter implements ModelAdapter {
       })),
     }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(requestBody),
-    })
+    const startedAt = Date.now()
+    await context?.tracer?.record(
+      'model_input',
+      {
+        url,
+        request: requestBody,
+        headers,
+      },
+      context.stepIndex,
+    )
 
-    const data = (await response.json()) as {
+    let response: Response
+    let data: {
       error?: { message?: string }
       stop_reason?: string
       content?: AnthropicContentBlock[]
     }
+
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody),
+      })
+
+      data = (await response.json()) as {
+        error?: { message?: string }
+        stop_reason?: string
+        content?: AnthropicContentBlock[]
+      }
+    } catch (error) {
+      await context?.tracer?.record(
+        'error',
+        {
+          phase: 'model_request',
+          durationMs: Date.now() - startedAt,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        context.stepIndex,
+      )
+      throw error
+    }
+
+    await context?.tracer?.record(
+      'model_raw_response',
+      {
+        durationMs: Date.now() - startedAt,
+        status: response.status,
+        ok: response.ok,
+        response: data,
+      },
+      context.stepIndex,
+    )
 
     if (!response.ok) {
       throw new Error(data.error?.message || `Model request failed: ${response.status}`)
@@ -227,7 +275,7 @@ export class AnthropicModelAdapter implements ModelAdapter {
     }
 
     if (toolCalls.length > 0) {
-      return {
+      const result = {
         type: 'tool_calls' as const,
         calls: toolCalls,
         content: parsedText.content || undefined,
@@ -237,13 +285,17 @@ export class AnthropicModelAdapter implements ModelAdapter {
             : undefined,
         diagnostics,
       }
+      await context?.tracer?.record('model_output', result, context.stepIndex)
+      return result
     }
 
-    return {
+    const result = {
       type: 'assistant' as const,
       content: parsedText.content,
       kind: parsedText.kind,
       diagnostics,
     }
+    await context?.tracer?.record('model_output', result, context.stepIndex)
+    return result
   }
 }

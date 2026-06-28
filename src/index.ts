@@ -16,6 +16,7 @@ import type { ChatMessage } from './types.js'
 import { renderBanner } from './ui.js'
 import { runTtyApp } from './tty-app.js'
 import { runAgentTurn } from './agent-loop.js'
+import { createAgentTracer, resolveTraceConfig } from './tracing.js'
 
 async function main(): Promise<void> {
   const isInteractiveTerminal = Boolean(process.stdin.isTTY && process.stdout.isTTY)
@@ -38,6 +39,22 @@ async function main(): Promise<void> {
   })
   const permissions = new PermissionManager(process.cwd())
   await permissions.whenReady()
+  const traceSettings = runtime?.trace
+  const tracer = createAgentTracer({
+    config: resolveTraceConfig(
+      traceSettings
+        ? {
+            ...traceSettings,
+            langfuse: traceSettings.langfuse
+              ? {
+                  ...traceSettings.langfuse,
+                  enabled: traceSettings.langfuse.enabled ?? false,
+                }
+              : undefined,
+          }
+        : undefined,
+    ),
+  })
   const model =
     process.env.TCODE_MODEL_MODE === 'mock'
       ? new MockModelAdapter()
@@ -61,6 +78,7 @@ async function main(): Promise<void> {
         messages,
         cwd: process.cwd(),
         permissions,
+        tracer,
       })
       return
     }
@@ -89,7 +107,10 @@ async function main(): Promise<void> {
           continue
         }
 
-        const localCommandResult = await tryHandleLocalCommand(input, { tools })
+        const localCommandResult = await tryHandleLocalCommand(input, {
+          tools,
+          trace: tracer.getStatus(),
+        })
         if (localCommandResult !== null) {
           console.log(`\n${localCommandResult}\n`)
           continue
@@ -128,6 +149,7 @@ async function main(): Promise<void> {
           cwd: process.cwd(),
           permissions,
           maxSteps: 8,
+          tracer,
         })
       } catch (error) {
         const message =
@@ -158,6 +180,7 @@ async function main(): Promise<void> {
       // 在输入结束的收尾阶段忽略重复关闭。
     }
   } finally {
+    await tracer.flush()
     await tools.dispose()
   }
 }

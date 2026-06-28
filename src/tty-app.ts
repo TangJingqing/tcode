@@ -35,6 +35,7 @@ import {
 import type { RuntimeConfig } from './config.js'
 import type { ToolRegistry } from './tool.js'
 import type { ChatMessage, ModelAdapter } from './types.js'
+import type { AgentTracer } from './tracing.js'
 
 type TtyAppArgs = {
   runtime: RuntimeConfig | null
@@ -43,6 +44,7 @@ type TtyAppArgs = {
   messages: ChatMessage[]
   cwd: string
   permissions: PermissionManager
+  tracer: AgentTracer
 }
 
 type PendingApproval = {
@@ -443,7 +445,10 @@ async function handleInput(
     return false
   }
 
-  const localCommandResult = await tryHandleLocalCommand(input, { tools: args.tools })
+  const localCommandResult = await tryHandleLocalCommand(input, {
+    tools: args.tools,
+    trace: args.tracer.getStatus(),
+  })
   if (localCommandResult !== null) {
     pushTranscriptEntry(state, {
       kind: 'assistant',
@@ -499,6 +504,7 @@ async function handleInput(
       cwd: args.cwd,
       permissions: args.permissions,
       maxSteps: 8,
+      tracer: args.tracer,
       onAssistantMessage(content) {
         pushTranscriptEntry(state, {
           kind: 'assistant',

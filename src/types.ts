@@ -1,3 +1,5 @@
+import type { AgentTracer } from './tracing.js'
+
 export type ChatMessage =
   | { role: 'system'; content: string }
   | { role: 'user'; content: string }
@@ -45,5 +47,11 @@ export type AgentStep =
     }
 
 export interface ModelAdapter {
-  next(messages: ChatMessage[]): Promise<AgentStep>
+  next(
+    messages: ChatMessage[],
+    context?: {
+      tracer?: AgentTracer
+      stepIndex?: number
+    },
+  ): Promise<AgentStep>
 }

@@ -7,6 +7,7 @@ import {
   saveTcodeSettings,
 } from './config.js'
 import type { ToolRegistry } from './tool.js'
+import type { TraceStatus } from './tracing.js'
 
 export type SlashCommand = {
   name: string
@@ -59,6 +60,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     name: '/permissions',
     usage: '/permissions',
     description: 'Show tcode permission storage path.',
+  },
+  {
+    name: '/trace',
+    usage: '/trace',
+    description: 'Show agent loop trace status and output path.',
   },
   {
     name: '/exit',
@@ -121,6 +127,7 @@ export async function tryHandleLocalCommand(
   input: string,
   context?: {
     tools?: ToolRegistry
+    trace?: TraceStatus
   },
 ): Promise<string | null> {
   if (input === '/') {
@@ -142,6 +149,19 @@ export async function tryHandleLocalCommand(
 
   if (input === '/permissions') {
     return `permission store: ${TCODE_PERMISSIONS_PATH}`
+  }
+
+  if (input === '/trace') {
+    const trace = context?.trace
+    if (!trace?.enabled) {
+      return 'trace: disabled. Set TCODE_TRACE=1 or trace.enabled=true to enable agent loop tracing.'
+    }
+
+    return [
+      `trace: enabled`,
+      `langfuse: ${trace.langfuseEnabled ? (trace.langfuseStatus ?? 'enabled') : 'disabled'}`,
+      trace.langfuseUrl ? `langfuse url: ${trace.langfuseUrl}` : undefined,
+    ].filter(Boolean).join('\n')
   }
 
   if (input === '/skills') {
@@ -183,11 +203,15 @@ export async function tryHandleLocalCommand(
 
   if (input === '/status') {
     const runtime = await loadRuntimeConfig()
+    const trace = context?.trace
     return [
       `model: ${runtime.model}`,
       `baseUrl: ${runtime.baseUrl}`,
       `auth: ${runtime.authToken ? 'ANTHROPIC_AUTH_TOKEN' : 'ANTHROPIC_API_KEY'}`,
       `mcp servers: ${Object.keys(runtime.mcpServers).length}`,
+      trace
+        ? `trace: ${trace.enabled ? 'enabled' : 'disabled'}`
+        : 'trace: unavailable',
       runtime.sourceSummary,
     ].join('\n')
   }

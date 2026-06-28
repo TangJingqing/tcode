@@ -11,6 +11,10 @@
     "install-cli": "tsx src/install.ts"
   },
   "dependencies": {
+    "@langfuse/client": "^5.9.0",
+    "@langfuse/otel": "^5.9.0",
+    "@langfuse/tracing": "^5.9.0",
+    "@opentelemetry/sdk-node": "^0.219.0",
     "diff": "^8.0.4",
     "zod": "^3.22.4"
   },
@@ -20,6 +24,6 @@
     "typescript": "^5.3.3"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   }
 }

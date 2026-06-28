@@ -1,6 +1,8 @@
 import type { ToolRegistry } from './tool.js'
 import type { ChatMessage, ModelAdapter } from './types.js'
 import type { PermissionManager } from './permissions.js'
+import type { AgentTracer } from './tracing.js'
+import { summarizeAgentStep, summarizeMessages } from './tracing.js'
 
 function looksLikeClarifyingQuestion(content: string): boolean {
   const trimmed = content.trim()
@@ -130,6 +132,7 @@ export async function runAgentTurn(args: {
   onToolResult?: (toolName: string, output: string, isError: boolean) => void
   onAssistantMessage?: (content: string) => void
   onProgressMessage?: (content: string) => void
+  tracer?: AgentTracer
 }): Promise<ChatMessage[]> {
   const maxSteps = args.maxSteps ?? 6
   let messages = args.messages
@@ -148,174 +151,327 @@ export async function runAgentTurn(args: {
     ]
   }
 
-  for (let step = 0; step < maxSteps; step++) {
-    const next = await args.model.next(messages)
+  const finishTurn = async (result: ChatMessage[], data: unknown): Promise<ChatMessage[]> => {
+    const metadata = data && typeof data === 'object' && !Array.isArray(data) ? data : {}
+    await args.tracer?.endTurn({
+      ...metadata,
+      finalMessageCount: result.length,
+    })
+    return result
+  }
 
-    if (next.type === 'assistant') {
-      const isEmpty = isEmptyAssistantResponse(next.content)
-      if (
-        !isEmpty &&
-        shouldTreatAssistantAsProgress({
-          kind: next.kind,
-          content: next.content,
-          sawToolResultThisTurn,
-        })
-      ) {
-        args.onProgressMessage?.(next.content)
-        messages = [
-          ...messages,
-          { role: 'assistant_progress', content: next.content },
-        ]
-        pushContinuationPrompt(
-          sawToolResultThisTurn && next.kind !== 'progress'
-            ? 'Continue from your progress update. You have already used tools in this turn, so treat plain status text as progress, not a final answer. Respond with the next concrete tool call, code change, or an explicit <final> answer only if the task is truly complete.'
-            : 'Continue immediately from your <progress> update with concrete tool calls, code changes, or an explicit <final> answer only if the task is complete.',
-        )
-        continue
-      }
+  await args.tracer?.startTurn({
+    cwd: args.cwd,
+    maxSteps,
+    initialMessageCount: messages.length,
+    messages: summarizeMessages(messages),
+  })
 
-      if (
-        isRecoverableThinkingStop({
-          isEmpty,
-          stopReason: next.diagnostics?.stopReason,
-          ignoredBlockTypes: next.diagnostics?.ignoredBlockTypes,
-        }) &&
-        recoverableThinkingRetryCount < 3
-      ) {
-        recoverableThinkingRetryCount += 1
-        const stopReason = next.diagnostics?.stopReason
-        const progressContent =
-          stopReason === 'max_tokens'
-            ? '模型在 thinking 阶段触发 max_tokens，正在继续请求后续步骤...'
-            : '模型返回 pause_turn，正在继续请求后续步骤...'
-        args.onProgressMessage?.(progressContent)
-        messages = [
-          ...messages,
-          { role: 'assistant_progress', content: progressContent },
-        ]
-        pushContinuationPrompt(
-          stopReason === 'max_tokens'
-            ? 'Your previous response hit max_tokens during thinking before producing the next actionable step. Resume immediately and continue with the next concrete tool call, code change, or an explicit <final> answer only if the task is complete. Do not repeat the earlier plan.'
-            : 'Resume from the previous pause_turn and continue the task immediately. Produce the next concrete tool call, code change, or an explicit <final> answer only if the task is complete.',
-        )
-        continue
-      }
+  try {
+    for (let step = 0; step < maxSteps; step++) {
+      await args.tracer?.record(
+        'model_input',
+        {
+          source: 'agent-loop',
+          messages: summarizeMessages(messages),
+        },
+        step,
+      )
+      const next = await args.model.next(messages, {
+        tracer: args.tracer,
+        stepIndex: step,
+      })
+      await args.tracer?.record(
+        'loop_decision',
+        {
+          phase: 'model_step_received',
+          step: summarizeAgentStep(next),
+        },
+        step,
+      )
 
-      if (isEmpty && emptyResponseRetryCount < 2) {
-        emptyResponseRetryCount += 1
-        pushContinuationPrompt(
-          sawToolResultThisTurn
+      if (next.type === 'assistant') {
+        const isEmpty = isEmptyAssistantResponse(next.content)
+        if (
+          !isEmpty &&
+          shouldTreatAssistantAsProgress({
+            kind: next.kind,
+            content: next.content,
+            sawToolResultThisTurn,
+          })
+        ) {
+          const continuationPrompt =
+            sawToolResultThisTurn && next.kind !== 'progress'
+              ? 'Continue from your progress update. You have already used tools in this turn, so treat plain status text as progress, not a final answer. Respond with the next concrete tool call, code change, or an explicit <final> answer only if the task is truly complete.'
+              : 'Continue immediately from your <progress> update with concrete tool calls, code changes, or an explicit <final> answer only if the task is complete.'
+          await args.tracer?.record(
+            'loop_decision',
+            {
+              decision: 'assistant_progress_continue',
+              continuationPrompt,
+            },
+            step,
+          )
+          args.onProgressMessage?.(next.content)
+          messages = [
+            ...messages,
+            { role: 'assistant_progress', content: next.content },
+          ]
+          pushContinuationPrompt(continuationPrompt)
+          continue
+        }
+
+        if (
+          isRecoverableThinkingStop({
+            isEmpty,
+            stopReason: next.diagnostics?.stopReason,
+            ignoredBlockTypes: next.diagnostics?.ignoredBlockTypes,
+          }) &&
+          recoverableThinkingRetryCount < 3
+        ) {
+          recoverableThinkingRetryCount += 1
+          const stopReason = next.diagnostics?.stopReason
+          const progressContent =
+            stopReason === 'max_tokens'
+              ? '模型在 thinking 阶段触发 max_tokens，正在继续请求后续步骤...'
+              : '模型返回 pause_turn，正在继续请求后续步骤...'
+          const continuationPrompt =
+            stopReason === 'max_tokens'
+              ? 'Your previous response hit max_tokens during thinking before producing the next actionable step. Resume immediately and continue with the next concrete tool call, code change, or an explicit <final> answer only if the task is complete. Do not repeat the earlier plan.'
+              : 'Resume from the previous pause_turn and continue the task immediately. Produce the next concrete tool call, code change, or an explicit <final> answer only if the task is complete.'
+          await args.tracer?.record(
+            'loop_decision',
+            {
+              decision: 'recoverable_thinking_retry',
+              retryCount: recoverableThinkingRetryCount,
+              stopReason,
+              continuationPrompt,
+            },
+            step,
+          )
+          args.onProgressMessage?.(progressContent)
+          messages = [
+            ...messages,
+            { role: 'assistant_progress', content: progressContent },
+          ]
+          pushContinuationPrompt(continuationPrompt)
+          continue
+        }
+
+        if (isEmpty && emptyResponseRetryCount < 2) {
+          emptyResponseRetryCount += 1
+          const continuationPrompt = sawToolResultThisTurn
             ? 'Your last response was empty after recent tool results. Continue immediately by trying the next concrete step, adapting to any tool errors, or giving an explicit <final> answer only if the task is complete.'
-            : 'Your last response was empty. Continue immediately with concrete tool calls, code changes, or an explicit <final> answer only if the task is complete.',
+            : 'Your last response was empty. Continue immediately with concrete tool calls, code changes, or an explicit <final> answer only if the task is complete.'
+          await args.tracer?.record(
+            'loop_decision',
+            {
+              decision: 'empty_response_retry',
+              retryCount: emptyResponseRetryCount,
+              continuationPrompt,
+            },
+            step,
+          )
+          pushContinuationPrompt(continuationPrompt)
+          continue
+        }
+
+        if (isEmpty) {
+          const diagnosticsSuffix = formatDiagnostics({
+            stopReason: next.diagnostics?.stopReason,
+            blockTypes: next.diagnostics?.blockTypes,
+            ignoredBlockTypes: next.diagnostics?.ignoredBlockTypes,
+          })
+          const fallbackContent =
+            sawToolResultThisTurn
+              ? toolErrorCount > 0
+                ? `工具执行后模型返回空响应，已停止当前回合。最近有 ${toolErrorCount} 个工具报错；请重试、调整命令，或让模型改用其他方案。${diagnosticsSuffix}`
+                : `工具执行后模型返回空响应，已停止当前回合。请重试，或要求模型继续完成剩余步骤。${diagnosticsSuffix}`
+              : `模型返回空响应，已停止当前回合。请重试，或要求模型继续。${diagnosticsSuffix}`
+
+          await args.tracer?.record(
+            'loop_decision',
+            {
+              decision: 'empty_response_fallback',
+              fallbackContent,
+              toolErrorCount,
+            },
+            step,
+          )
+          args.onAssistantMessage?.(fallbackContent)
+          return finishTurn(
+            [
+              ...messages,
+              {
+                role: 'assistant',
+                content: fallbackContent,
+              },
+            ],
+            { outcome: 'empty_response_fallback' },
+          )
+        }
+
+        const assistantMessage: ChatMessage = {
+          role: 'assistant',
+          content: next.content,
+        }
+        const withAssistant: ChatMessage[] = [
+          ...messages,
+          assistantMessage,
+        ]
+
+        await args.tracer?.record(
+          'loop_decision',
+          {
+            decision: 'assistant_final',
+            kind: next.kind,
+          },
+          step,
         )
-        continue
+        if (!isEmpty) {
+          args.onAssistantMessage?.(next.content)
+        }
+
+        return finishTurn(withAssistant, { outcome: 'assistant_final' })
       }
 
-      if (isEmpty) {
-        const diagnosticsSuffix = formatDiagnostics({
-          stopReason: next.diagnostics?.stopReason,
-          blockTypes: next.diagnostics?.blockTypes,
-          ignoredBlockTypes: next.diagnostics?.ignoredBlockTypes,
-        })
-        const fallbackContent =
-          sawToolResultThisTurn
-            ? toolErrorCount > 0
-              ? `工具执行后模型返回空响应，已停止当前回合。最近有 ${toolErrorCount} 个工具报错；请重试、调整命令，或让模型改用其他方案。${diagnosticsSuffix}`
-              : `工具执行后模型返回空响应，已停止当前回合。请重试，或要求模型继续完成剩余步骤。${diagnosticsSuffix}`
-            : `模型返回空响应，已停止当前回合。请重试，或要求模型继续。${diagnosticsSuffix}`
+      if (next.content && looksLikeClarifyingQuestion(next.content)) {
+        await args.tracer?.record(
+          'loop_decision',
+          {
+            decision: 'clarifying_question',
+            content: next.content,
+          },
+          step,
+        )
+        args.onAssistantMessage?.(next.content)
+        return finishTurn(
+          [
+            ...messages,
+            { role: 'assistant', content: next.content },
+          ],
+          { outcome: 'clarifying_question' },
+        )
+      }
 
-        args.onAssistantMessage?.(fallbackContent)
-        return [
+      if (next.content) {
+        if (next.contentKind === 'progress') {
+          const continuationPrompt =
+            'Continue immediately from your <progress> update with concrete tool calls, code changes, or an explicit <final> answer only if the task is complete.'
+          await args.tracer?.record(
+            'loop_decision',
+            {
+              decision: 'tool_call_progress_continue',
+              continuationPrompt,
+            },
+            step,
+          )
+          args.onProgressMessage?.(next.content)
+          messages = [
+            ...messages,
+            { role: 'assistant_progress', content: next.content },
+          ]
+          pushContinuationPrompt(continuationPrompt)
+        } else {
+          await args.tracer?.record(
+            'loop_decision',
+            {
+              decision: 'tool_call_assistant_text',
+              content: next.content,
+            },
+            step,
+          )
+          args.onAssistantMessage?.(next.content)
+          messages = [
+            ...messages,
+            { role: 'assistant', content: next.content },
+          ]
+        }
+      }
+
+      for (const call of next.calls) {
+        const toolStartedAt = Date.now()
+        await args.tracer?.record(
+          'tool_start',
+          {
+            toolUseId: call.id,
+            toolName: call.toolName,
+            input: call.input,
+          },
+          step,
+        )
+        args.onToolStart?.(call.toolName, call.input)
+        const result = await args.tools.execute(
+          call.toolName,
+          call.input,
+          { cwd: args.cwd, permissions: args.permissions },
+        )
+        sawToolResultThisTurn = true
+        if (!result.ok) {
+          toolErrorCount += 1
+        }
+        await args.tracer?.record(
+          'tool_end',
+          {
+            toolUseId: call.id,
+            toolName: call.toolName,
+            ok: result.ok,
+            output: result.output,
+            durationMs: Date.now() - toolStartedAt,
+          },
+          step,
+        )
+        args.onToolResult?.(call.toolName, result.output, !result.ok)
+
+        messages = [
           ...messages,
           {
-            role: 'assistant',
-            content: fallbackContent,
+            role: 'assistant_tool_call',
+            toolUseId: call.id,
+            toolName: call.toolName,
+            input: call.input,
+          },
+          {
+            role: 'tool_result',
+            toolUseId: call.id,
+            toolName: call.toolName,
+            content: result.ok ? result.output : result.output,
+            isError: !result.ok,
           },
         ]
       }
-
-      const assistantMessage: ChatMessage = {
-        role: 'assistant',
-        content: next.content,
-      }
-      const withAssistant: ChatMessage[] = [
-        ...messages,
-        assistantMessage,
-      ]
-
-      if (!isEmpty) {
-        args.onAssistantMessage?.(next.content)
-      }
-
-      return withAssistant
     }
 
-    if (next.content && looksLikeClarifyingQuestion(next.content)) {
-      args.onAssistantMessage?.(next.content)
-      return [
-        ...messages,
-        { role: 'assistant', content: next.content },
-      ]
-    }
-
-    if (next.content) {
-      if (next.contentKind === 'progress') {
-        args.onProgressMessage?.(next.content)
-        messages = [
-          ...messages,
-          { role: 'assistant_progress', content: next.content },
-        ]
-        pushContinuationPrompt(
-          'Continue immediately from your <progress> update with concrete tool calls, code changes, or an explicit <final> answer only if the task is complete.',
-        )
-      } else {
-        args.onAssistantMessage?.(next.content)
-        messages = [
-          ...messages,
-          { role: 'assistant', content: next.content },
-        ]
-      }
-    }
-
-    for (const call of next.calls) {
-      args.onToolStart?.(call.toolName, call.input)
-      const result = await args.tools.execute(
-        call.toolName,
-        call.input,
-        { cwd: args.cwd, permissions: args.permissions },
-      )
-      sawToolResultThisTurn = true
-      if (!result.ok) {
-        toolErrorCount += 1
-      }
-      args.onToolResult?.(call.toolName, result.output, !result.ok)
-
-      messages = [
+    const maxStepContent = `达到最大工具步数限制，已停止当前回合。`
+    await args.tracer?.record(
+      'loop_decision',
+      {
+        decision: 'max_steps',
+        maxSteps,
+        content: maxStepContent,
+      },
+      maxSteps,
+    )
+    args.onAssistantMessage?.(maxStepContent)
+    return finishTurn(
+      [
         ...messages,
         {
-          role: 'assistant_tool_call',
-          toolUseId: call.id,
-          toolName: call.toolName,
-          input: call.input,
+          role: 'assistant',
+          content: maxStepContent,
         },
-        {
-          role: 'tool_result',
-          toolUseId: call.id,
-          toolName: call.toolName,
-          content: result.ok ? result.output : result.output,
-          isError: !result.ok,
-        },
-      ]
-    }
+      ],
+      { outcome: 'max_steps' },
+    )
+  } catch (error) {
+    await args.tracer?.record('error', {
+      phase: 'agent_loop',
+      error: error instanceof Error ? error.message : String(error),
+    })
+    await args.tracer?.endTurn({
+      outcome: 'error',
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw error
   }
-
-  const maxStepContent = `达到最大工具步数限制，已停止当前回合。`
-  args.onAssistantMessage?.(maxStepContent)
-  return [
-    ...messages,
-    {
-      role: 'assistant',
-      content: maxStepContent,
-    },
-  ]
 }

@@ -11,11 +11,23 @@ export type McpServerConfig = {
   protocol?: 'auto' | 'content-length' | 'newline-json'
 }
 
+export type TraceSettings = {
+  enabled?: boolean
+  langfuse?: {
+    enabled?: boolean
+    publicKey?: string
+    secretKey?: string
+    baseUrl?: string
+    environment?: string
+  }
+}
+
 export type TcodeSettings = {
   env?: Record<string, string | number>
   model?: string
   maxOutputTokens?: number
   mcpServers?: Record<string, McpServerConfig>
+  trace?: TraceSettings
 }
 
 export type McpConfigScope = 'user' | 'project'
@@ -27,6 +39,7 @@ export type RuntimeConfig = {
   apiKey?: string
   maxOutputTokens?: number
   mcpServers: Record<string, McpServerConfig>
+  trace?: TraceSettings
   sourceSummary: string
 }
 
@@ -142,6 +155,21 @@ function mergeSettings(
     }
   }
 
+  const mergedTrace =
+    base.trace || override.trace
+      ? {
+          ...(base.trace ?? {}),
+          ...(override.trace ?? {}),
+          langfuse:
+            base.trace?.langfuse || override.trace?.langfuse
+              ? {
+                  ...(base.trace?.langfuse ?? {}),
+                  ...(override.trace?.langfuse ?? {}),
+                }
+              : undefined,
+        }
+      : undefined
+
   return {
     ...base,
     ...override,
@@ -150,6 +178,7 @@ function mergeSettings(
       ...(override.env ?? {}),
     },
     mcpServers: mergedMcpServers,
+    trace: mergedTrace,
   }
 }
 
@@ -227,6 +256,7 @@ export async function loadRuntimeConfig(): Promise<RuntimeConfig> {
     apiKey,
     maxOutputTokens,
     mcpServers: effectiveSettings.mcpServers ?? {},
+    trace: effectiveSettings.trace,
     sourceSummary: `config: ${TCODE_SETTINGS_PATH} > ${CLAUDE_SETTINGS_PATH} > process.env`,
   }
 }
