@@ -22,7 +22,9 @@ import {
   getPermissionPromptMaxScrollOffset,
   hideCursor,
   renderBanner,
+  renderFooterBar,
   renderInputPrompt,
+  renderPanel,
   renderPermissionPrompt,
   renderSlashMenu,
   renderStatusLine,
@@ -79,18 +81,72 @@ type TranscriptEntryDraft =
   | Omit<Extract<TranscriptEntry, { kind: 'progress' }>, 'id'>
   | Omit<Extract<TranscriptEntry, { kind: 'tool' }>, 'id'>
 
-function getMaxTranscriptScrollOffset(state: ScreenState): number {
-  return getTranscriptMaxScrollOffset(state.transcript)
+function getSessionStats(args: TtyAppArgs, state: ScreenState) {
+  return {
+    transcriptCount: state.transcript.length,
+    messageCount: args.messages.length,
+    skillCount: args.tools.getSkills().length,
+    mcpCount: args.tools.getMcpServers().length,
+  }
+}
+
+function renderHeaderPanel(args: TtyAppArgs, state: ScreenState): string {
+  return renderBanner(
+    args.runtime,
+    args.cwd,
+    args.permissions.getSummary(),
+    getSessionStats(args, state),
+  )
+}
+
+function renderPromptPanel(state: ScreenState): string {
+  const commands = getVisibleCommands(state.input)
+  const promptBody = [
+    renderInputPrompt(state.input, state.cursorOffset),
+    commands.length > 0
+      ? `\n${renderSlashMenu(
+          commands,
+          Math.min(state.selectedSlashIndex, commands.length - 1),
+        )}`
+      : '',
+  ].join('')
+  return renderPanel('prompt', promptBody)
+}
+
+function getTranscriptBodyLines(args: TtyAppArgs, state: ScreenState): number {
+  const rows = Math.max(24, process.stdout.rows ?? 40)
+  const headerLines = renderHeaderPanel(args, state).split('\n').length
+  const promptLines = renderPromptPanel(state).split('\n').length
+  const footerLines = 1
+  const gapsBetweenSections = 3
+  const transcriptPanelFrameLines = 4
+  const remaining =
+    rows -
+    headerLines -
+    promptLines -
+    footerLines -
+    gapsBetweenSections -
+    transcriptPanelFrameLines
+
+  return Math.max(6, remaining)
+}
+
+function getMaxTranscriptScrollOffset(args: TtyAppArgs, state: ScreenState): number {
+  return getTranscriptMaxScrollOffset(
+    state.transcript,
+    getTranscriptBodyLines(args, state),
+  )
 }
 
 function scrollTranscriptBy(
+  args: TtyAppArgs,
   state: ScreenState,
   delta: number,
 ): boolean {
   const nextOffset = Math.max(
     0,
     Math.min(
-      getMaxTranscriptScrollOffset(state),
+      getMaxTranscriptScrollOffset(args, state),
       state.transcriptScrollOffset + delta,
     ),
   )
@@ -104,10 +160,12 @@ function scrollTranscriptBy(
 }
 
 function jumpTranscriptToEdge(
+  args: TtyAppArgs,
   state: ScreenState,
   target: 'top' | 'bottom',
 ): boolean {
-  const nextOffset = target === 'top' ? getMaxTranscriptScrollOffset(state) : 0
+  const nextOffset =
+    target === 'top' ? getMaxTranscriptScrollOffset(args, state) : 0
   if (nextOffset === state.transcriptScrollOffset) {
     return false
   }
@@ -325,52 +383,71 @@ function extractPathFromToolInput(input: unknown): string | null {
 
 function renderScreen(args: TtyAppArgs, state: ScreenState): void {
   clearScreen()
-  console.log(
-    renderBanner(args.runtime, args.cwd, args.permissions.getSummary()),
-  )
+  console.log(renderHeaderPanel(args, state))
   console.log('')
-
-  if (state.transcript.length > 0) {
-    console.log(renderTranscript(state.transcript, state.transcriptScrollOffset))
-    console.log('')
-  }
-
-  console.log(renderInputPrompt(state.input, state.cursorOffset))
-
-  const commands = getVisibleCommands(state.input)
-  if (commands.length > 0) {
-    console.log('')
-    console.log(
-      renderSlashMenu(
-        commands,
-        Math.min(state.selectedSlashIndex, commands.length - 1),
-      ),
-    )
-  }
 
   if (state.pendingApproval) {
+    console.log(
+      renderPanel(
+        'approval',
+        renderPermissionPrompt(state.pendingApproval.request, {
+          expanded: state.pendingApproval.detailsExpanded,
+          scrollOffset: state.pendingApproval.detailsScrollOffset,
+          selectedChoiceIndex: state.pendingApproval.selectedChoiceIndex,
+          feedbackMode: state.pendingApproval.feedbackMode,
+          feedbackInput: state.pendingApproval.feedbackInput,
+        }),
+      ),
+    )
+    console.log('')
+    console.log(renderPanel('activity', renderToolPanel(state.activeTool, state.recentTools)))
     console.log('')
     console.log(
-      renderPermissionPrompt(state.pendingApproval.request, {
-        expanded: state.pendingApproval.detailsExpanded,
-        scrollOffset: state.pendingApproval.detailsScrollOffset,
-        selectedChoiceIndex: state.pendingApproval.selectedChoiceIndex,
-        feedbackMode: state.pendingApproval.feedbackMode,
-        feedbackInput: state.pendingApproval.feedbackInput,
-      }),
+      renderFooterBar(
+        state.status,
+        true,
+        args.tools.getSkills().length > 0,
+      ),
     )
+    return
   }
 
+  console.log(
+    renderPanel(
+      'session feed',
+      state.transcript.length > 0
+        ? renderTranscript(
+            state.transcript,
+            state.transcriptScrollOffset,
+            getTranscriptBodyLines(args, state),
+          )
+        : `${renderStatusLine(null)}\n\nType /help for commands.`,
+      {
+        rightTitle: `${state.transcript.length} events`,
+        minBodyLines: getTranscriptBodyLines(args, state),
+      },
+    ),
+  )
   console.log('')
-  console.log(renderToolPanel(state.activeTool, state.recentTools))
+  console.log(renderPromptPanel(state))
+
   console.log('')
-  console.log(renderStatusLine(state.status))
+  console.log(
+    renderFooterBar(
+      state.status,
+      true,
+      args.tools.getSkills().length > 0,
+    ),
+  )
 }
 
 async function refreshSystemPrompt(args: TtyAppArgs): Promise<void> {
   args.messages[0] = {
     role: 'system',
-    content: await buildSystemPrompt(args.cwd, args.permissions.getSummary()),
+    content: await buildSystemPrompt(args.cwd, args.permissions.getSummary(), {
+      skills: args.tools.getSkills(),
+      mcpServers: args.tools.getMcpServers(),
+    }),
   }
 }
 
@@ -908,8 +985,8 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
         if (event.kind === 'wheel') {
           if (
             event.direction === 'up'
-              ? scrollTranscriptBy(state, 3)
-              : scrollTranscriptBy(state, -3)
+              ? scrollTranscriptBy(permissionArgs, state, 3)
+              : scrollTranscriptBy(permissionArgs, state, -3)
           ) {
             renderScreen(permissionArgs, state)
           }
@@ -1005,7 +1082,7 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
               visibleCommands.length
             renderScreen(permissionArgs, state)
           } else if (event.meta) {
-            if (scrollTranscriptBy(state, 1)) {
+            if (scrollTranscriptBy(permissionArgs, state, 1)) {
               renderScreen(permissionArgs, state)
             }
           } else if (historyUp(state)) {
@@ -1018,9 +1095,9 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
           if (visibleCommands.length > 0) {
             state.selectedSlashIndex =
               (state.selectedSlashIndex + 1) % visibleCommands.length
-              renderScreen(permissionArgs, state)
+            renderScreen(permissionArgs, state)
           } else if (event.meta) {
-            if (scrollTranscriptBy(state, -1)) {
+            if (scrollTranscriptBy(permissionArgs, state, -1)) {
               renderScreen(permissionArgs, state)
             }
           } else if (historyDown(state)) {
@@ -1030,14 +1107,14 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
         }
 
         if (event.kind === 'key' && event.name === 'pageup') {
-          if (scrollTranscriptBy(state, 8)) {
+          if (scrollTranscriptBy(permissionArgs, state, 8)) {
             renderScreen(permissionArgs, state)
           }
           return
         }
 
         if (event.kind === 'key' && event.name === 'pagedown') {
-          if (scrollTranscriptBy(state, -8)) {
+          if (scrollTranscriptBy(permissionArgs, state, -8)) {
             renderScreen(permissionArgs, state)
           }
           return
@@ -1065,7 +1142,7 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
 
         if (event.kind === 'text' && event.ctrl && event.text === 'a') {
           if (!state.input) {
-            if (jumpTranscriptToEdge(state, 'top')) {
+            if (jumpTranscriptToEdge(permissionArgs, state, 'top')) {
               renderScreen(permissionArgs, state)
             }
             return
@@ -1078,7 +1155,7 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
 
         if (event.kind === 'text' && event.ctrl && event.text === 'e') {
           if (!state.input) {
-            if (jumpTranscriptToEdge(state, 'bottom')) {
+            if (jumpTranscriptToEdge(permissionArgs, state, 'bottom')) {
               renderScreen(permissionArgs, state)
             }
             return

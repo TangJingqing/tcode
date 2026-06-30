@@ -39,17 +39,17 @@ function previewToolBody(toolName: string, body: string): string {
 
 function renderTranscriptEntry(entry: TranscriptEntry): string {
   if (entry.kind === 'user') {
-    return `${CYAN}${BOLD}You${RESET}\n${indentBlock(entry.body)}`
+    return `${CYAN}${BOLD}you${RESET}\n${indentBlock(entry.body)}`
   }
 
   if (entry.kind === 'assistant') {
-    return `${GREEN}${BOLD}Tcode${RESET}\n${indentBlock(
+    return `${GREEN}${BOLD}assistant${RESET}\n${indentBlock(
       renderMarkdownish(entry.body),
     )}`
   }
 
   if (entry.kind === 'progress') {
-    return `${YELLOW}${BOLD}Progress${RESET}\n${indentBlock(
+    return `${YELLOW}${BOLD}progress${RESET}\n${indentBlock(
       renderMarkdownish(entry.body),
     )}`
   }
@@ -70,17 +70,20 @@ function renderTranscriptEntry(entry: TranscriptEntry): string {
           ? `${DIM}collapsing${'.'.repeat(entry.collapsePhase)}${RESET}`
           : previewToolBody(entry.toolName, renderMarkdownish(entry.body))
 
-  return `${MAGENTA}${BOLD}Tool${RESET} ${entry.toolName} ${status}\n${indentBlock(body)}`
+  return `${MAGENTA}${BOLD}tool${RESET} ${entry.toolName} ${status}\n${indentBlock(body)}`
 }
 
-export function getTranscriptWindowSize(): number {
+export function getTranscriptWindowSize(windowSize?: number): number {
+  if (windowSize !== undefined) {
+    return Math.max(4, windowSize)
+  }
   const rows = process.stdout.rows ?? 40
   return Math.max(8, rows - 15)
 }
 
 function renderTranscriptLines(entries: TranscriptEntry[]): string[] {
   const rendered = entries.map(renderTranscriptEntry)
-  const separator = `${BLUE}${DIM}│${RESET}`
+  const separator = `${BLUE}${DIM}\u00b7${RESET}`
   const lines: string[] = []
 
   rendered.forEach((block, index) => {
@@ -96,22 +99,26 @@ function renderTranscriptLines(entries: TranscriptEntry[]): string[] {
   return lines
 }
 
-export function getTranscriptMaxScrollOffset(entries: TranscriptEntry[]): number {
+export function getTranscriptMaxScrollOffset(
+  entries: TranscriptEntry[],
+  windowSize?: number,
+): number {
   if (entries.length === 0) return 0
   const lines = renderTranscriptLines(entries)
-  return Math.max(0, lines.length - getTranscriptWindowSize())
+  return Math.max(0, lines.length - getTranscriptWindowSize(windowSize))
 }
 
 export function renderTranscript(
   entries: TranscriptEntry[],
   scrollOffset: number,
+  windowSize?: number,
 ): string {
   if (entries.length === 0) {
     return ''
   }
 
   const lines = renderTranscriptLines(entries)
-  const pageSize = getTranscriptWindowSize()
+  const pageSize = getTranscriptWindowSize(windowSize)
   const maxOffset = Math.max(0, lines.length - pageSize)
   const offset = Math.max(0, Math.min(scrollOffset, maxOffset))
   const end = lines.length - offset

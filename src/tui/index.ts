@@ -1,6 +1,8 @@
 export {
   getPermissionPromptMaxScrollOffset,
   renderBanner,
+  renderFooterBar,
+  renderPanel,
   renderPermissionPrompt,
   renderSlashMenu,
   renderStatusLine,

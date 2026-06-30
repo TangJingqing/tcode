@@ -1,6 +1,8 @@
 const RESET = '\u001b[0m'
 const DIM = '\u001b[2m'
-const CYAN = '\u001b[36m'
+const GREEN = '\u001b[32m'
+const YELLOW = '\u001b[33m'
+const BOLD = '\u001b[1m'
 const REVERSE = '\u001b[7m'
 
 export function renderInputPrompt(input: string, cursorOffset: number): string {
@@ -8,5 +10,9 @@ export function renderInputPrompt(input: string, cursorOffset: number): string {
   const before = input.slice(0, offset)
   const current = input[offset] ?? ' '
   const after = input.slice(Math.min(offset + 1, input.length))
-  return `${CYAN}>${RESET} ${before}${REVERSE}${current}${RESET}${after}${DIM}${input ? '' : ' ask tcode to inspect, edit, or run commands'}${RESET}`
+  return [
+    `${YELLOW}${BOLD}prompt${RESET} ${DIM}Enter send | /help commands | Esc clear | Ctrl+C exit${RESET}`,
+    '',
+    `${GREEN}${BOLD}tcode>${RESET} ${before}${REVERSE}${current}${RESET}${after}${DIM}${input ? '' : ' Ask for code, files, tasks, or MCP tools'}${RESET}`,
+  ].join('\n')
 }
