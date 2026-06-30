@@ -57,6 +57,43 @@ export type McpServerSummary = {
 
 type JsonRpcProtocol = 'content-length' | 'newline-json'
 
+function formatChildProcessError(
+  serverName: string,
+  command: string,
+  stderrLines: string[],
+  error: unknown,
+): Error {
+  const code =
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof error.code === 'string'
+      ? error.code
+      : undefined
+  const detail =
+    error instanceof Error ? error.message : String(error)
+
+  const lines = [`Failed to start MCP server "${serverName}" using command "${command}".`]
+
+  if (code === 'ENOENT') {
+    lines.push(
+      `Command not found: ${command}. Install it first and ensure it is available in PATH.`,
+    )
+  } else if (detail) {
+    lines.push(detail)
+  }
+
+  if (detail && code === 'ENOENT') {
+    lines.push(`Original error: ${detail}`)
+  }
+
+  if (stderrLines.length > 0) {
+    lines.push(stderrLines.join('\n'))
+  }
+
+  return new Error(lines.join('\n'))
+}
+
 function sanitizeToolSegment(value: string): string {
   return (
     value
@@ -320,6 +357,24 @@ class StdioMcpClient {
     })
 
     this.process = child
+    const handleProcessError = (error: unknown) => {
+      const wrapped = formatChildProcessError(
+        this.serverName,
+        command,
+        this.stderrLines,
+        error,
+      )
+
+      if (this.process === child) {
+        for (const pending of this.pending.values()) {
+          clearTimeout(pending.timeout)
+          pending.reject(wrapped)
+        }
+        this.pending.clear()
+        this.process = null
+      }
+    }
+
     child.stdout.on('data', chunk => {
       if (this.process !== child) {
         return
@@ -333,6 +388,7 @@ class StdioMcpClient {
       this.stderrLines.push(String(chunk).trim())
       this.stderrLines = this.stderrLines.filter(Boolean).slice(-8)
     })
+    child.on('error', handleProcessError)
     child.on('exit', code => {
       if (this.process !== child) {
         return
@@ -349,6 +405,22 @@ class StdioMcpClient {
       }
       this.pending.clear()
       this.process = null
+    })
+
+    await new Promise<void>((resolve, reject) => {
+      const onSpawn = () => {
+        child.off('error', onInitialError)
+        resolve()
+      }
+      const onInitialError = (error: unknown) => {
+        child.off('spawn', onSpawn)
+        reject(
+          formatChildProcessError(this.serverName, command, this.stderrLines, error),
+        )
+      }
+
+      child.once('spawn', onSpawn)
+      child.once('error', onInitialError)
     })
   }
 
