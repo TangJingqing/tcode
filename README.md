@@ -1,6 +1,6 @@
 # tcode
 
-[中文架构说明](./ARCHITECTURE_ZH.md) | [技术说明](./TECHNICAL_OVERVIEW_ZH.md)
+[简体中文](./README.zh-CN.md) | [Architecture](./ARCHITECTURE.md) | [中文架构说明](./ARCHITECTURE_ZH.md) | [Contributing](./CONTRIBUTING.md) | [Roadmap](./ROADMAP.md) | [Learn Claude Code Design Through tcode](./CLAUDE_CODE_PATTERNS.md) | [技术说明](./TECHNICAL_OVERVIEW_ZH.md) | [License](./LICENSE)
 
 A lightweight terminal coding assistant for local development workflows.
 
@@ -66,6 +66,7 @@ tcode is a good fit if you want:
 - `patch_file`
 - `modify_file`
 - `run_command`
+- `ask_user`
 - `load_skill`
 - `list_mcp_resources`
 - `read_mcp_resource`

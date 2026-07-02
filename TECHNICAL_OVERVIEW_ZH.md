@@ -258,6 +258,7 @@ TCODE_TRACE_LANGFUSE=1
 - `edit_file`：基于 search/replace 精确编辑。
 - `patch_file`：应用多段文本替换补丁。
 - `run_command`：执行白名单内的本地命令。
+- `ask_user`：向用户提出澄清问题，并暂停当前回合等待回复。
 - `load_skill`：读取并加载本地 `SKILL.md` 工作流说明。
 - `list_mcp_resources` / `read_mcp_resource`：列出和读取 MCP resources。
 - `list_mcp_prompts` / `get_mcp_prompt`：列出和读取 MCP prompts。

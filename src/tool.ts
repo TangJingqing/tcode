@@ -11,6 +11,17 @@ export type ToolContext = {
 export type ToolResult = {
   ok: boolean
   output: string
+  backgroundTask?: BackgroundTaskResult
+  awaitUser?: boolean
+}
+
+export type BackgroundTaskResult = {
+  taskId: string
+  type: 'local_bash'
+  command: string
+  pid: number
+  status: 'running' | 'completed' | 'failed'
+  startedAt: number
 }
 
 export type ToolDefinition<TInput> = {

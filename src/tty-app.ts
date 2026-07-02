@@ -1,4 +1,5 @@
 import process from 'node:process'
+import { listBackgroundTasks } from './background-tasks.js'
 import { runAgentTurn } from './agent-loop.js'
 import {
   SLASH_COMMANDS,
@@ -73,6 +74,7 @@ type ScreenState = {
   historyDraft: string
   nextEntryId: number
   pendingApproval: PendingApproval | null
+  isBusy: boolean
 }
 
 type TranscriptEntryDraft =
@@ -270,6 +272,32 @@ function collapseToolEntry(
   entry.collapsedSummary = summary
 }
 
+function getRunningToolEntries(state: ScreenState): Array<Extract<TranscriptEntry, { kind: 'tool' }>> {
+  return state.transcript.filter(
+    (entry): entry is Extract<TranscriptEntry, { kind: 'tool' }> =>
+      entry.kind === 'tool' && entry.status === 'running',
+  )
+}
+
+function finalizeDanglingRunningTools(state: ScreenState): void {
+  const runningEntries = getRunningToolEntries(state)
+  for (const entry of runningEntries) {
+    entry.status = 'error'
+    entry.body = `${entry.body}\n\nERROR: Tool did not report a final result before the turn ended. This usually means the command kept running in the background or the tool lifecycle got out of sync.`
+    entry.collapsed = false
+    entry.collapsedSummary = undefined
+    entry.collapsePhase = undefined
+    state.recentTools.push({
+      name: entry.toolName,
+      status: 'error',
+    })
+  }
+  if (runningEntries.length > 0) {
+    state.activeTool = null
+    state.status = `Previous turn ended with ${runningEntries.length} unfinished tool call(s).`
+  }
+}
+
 function summarizeCollapsedToolBody(output: string): string {
   const line = output
     .split('\n')
@@ -382,6 +410,7 @@ function extractPathFromToolInput(input: unknown): string | null {
 }
 
 function renderScreen(args: TtyAppArgs, state: ScreenState): void {
+  const backgroundTasks = listBackgroundTasks()
   clearScreen()
   console.log(renderHeaderPanel(args, state))
   console.log('')
@@ -400,13 +429,19 @@ function renderScreen(args: TtyAppArgs, state: ScreenState): void {
       ),
     )
     console.log('')
-    console.log(renderPanel('activity', renderToolPanel(state.activeTool, state.recentTools)))
+    console.log(
+      renderPanel(
+        'activity',
+        renderToolPanel(state.activeTool, state.recentTools, backgroundTasks),
+      ),
+    )
     console.log('')
     console.log(
       renderFooterBar(
         state.status,
         true,
         args.tools.getSkills().length > 0,
+        backgroundTasks,
       ),
     )
     return
@@ -437,6 +472,7 @@ function renderScreen(args: TtyAppArgs, state: ScreenState): void {
       state.status,
       true,
       args.tools.getSkills().length > 0,
+      backgroundTasks,
     ),
   )
 }
@@ -458,6 +494,7 @@ async function executeToolShortcut(
   input: unknown,
   rerender: () => void,
 ): Promise<void> {
+  state.isBusy = true
   state.status = `Running ${toolName}...`
   state.activeTool = toolName
   const entryId = pushTranscriptEntry(state, {
@@ -468,39 +505,54 @@ async function executeToolShortcut(
   })
   rerender()
 
-  const result = await args.tools.execute(toolName, input, {
-    cwd: args.cwd,
-    permissions: args.permissions,
-  })
+  try {
+    const result = await args.tools.execute(toolName, input, {
+      cwd: args.cwd,
+      permissions: args.permissions,
+    })
 
-  state.recentTools.push({
-    name: toolName,
-    status: result.ok ? 'success' : 'error',
-  })
-  updateToolEntry(
-    state,
-    entryId,
-    result.ok ? 'success' : 'error',
-    result.ok ? result.output : `ERROR: ${result.output}`,
-  )
-  collapseToolEntry(
-    state,
-    entryId,
-    summarizeCollapsedToolBody(
+    state.recentTools.push({
+      name: toolName,
+      status: result.ok ? 'success' : 'error',
+    })
+    updateToolEntry(
+      state,
+      entryId,
+      result.ok ? 'success' : 'error',
       result.ok ? result.output : `ERROR: ${result.output}`,
-    ),
-  )
-  state.activeTool = null
-  state.status = null
-  state.transcriptScrollOffset = 0
+    )
+    collapseToolEntry(
+      state,
+      entryId,
+      summarizeCollapsedToolBody(
+        result.ok ? result.output : `ERROR: ${result.output}`,
+      ),
+    )
+    state.transcriptScrollOffset = 0
+  } finally {
+    state.isBusy = false
+    state.activeTool = null
+    finalizeDanglingRunningTools(state)
+    if (getRunningToolEntries(state).length === 0) {
+      state.status = null
+    }
+  }
 }
 
 async function handleInput(
   args: TtyAppArgs,
   state: ScreenState,
   rerender: () => void,
+  submittedRawInput?: string,
 ): Promise<boolean> {
-  const input = state.input.trim()
+  if (state.isBusy) {
+    state.status = state.activeTool
+      ? `Running ${state.activeTool}...`
+      : 'Current turn is still running...'
+    return false
+  }
+
+  const input = (submittedRawInput ?? state.input).trim()
   if (!input) return false
   if (input === '/exit') return true
 
@@ -566,6 +618,7 @@ async function handleInput(
   })
   state.transcriptScrollOffset = 0
   state.status = 'Thinking...'
+  state.isBusy = true
   rerender()
 
   const pendingToolEntries = new Map<string, number[]>()
@@ -745,9 +798,13 @@ async function handleInput(
     state.transcriptScrollOffset = 0
   } finally {
     args.permissions.endTurn()
+    state.isBusy = false
   }
 
-  state.status = null
+  finalizeDanglingRunningTools(state)
+  if (getRunningToolEntries(state).length === 0) {
+    state.status = null
+  }
   return false
 }
 
@@ -792,6 +849,7 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
     historyDraft: '',
     nextEntryId: 1,
     pendingApproval: null,
+    isBusy: false,
   }
   state.historyIndex = state.history.length
 
@@ -810,6 +868,7 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
   await new Promise<void>(resolve => {
     let finished = false
     let inputRemainder = ''
+    let eventChain = Promise.resolve()
 
     const cleanup = () => {
       process.stdin.off('data', onData)
@@ -908,6 +967,14 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
               scrollBy(8)
               return
             }
+            if (event.kind === 'key' && event.name === 'up' && event.meta) {
+              scrollBy(-1)
+              return
+            }
+            if (event.kind === 'key' && event.name === 'down' && event.meta) {
+              scrollBy(1)
+              return
+            }
           }
 
           // 方向键导航：移动当前选中项。
@@ -994,6 +1061,14 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
         }
 
         if (event.kind === 'key' && event.name === 'return') {
+          if (state.isBusy) {
+            state.status = state.activeTool
+              ? `Running ${state.activeTool}...`
+              : 'Current turn is still running...'
+            renderScreen(permissionArgs, state)
+            return
+          }
+
           if (visibleCommands.length > 0) {
             const selected =
               visibleCommands[
@@ -1008,14 +1083,17 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
             }
           }
 
+          const submittedInput = state.input
+          state.input = ''
+          state.cursorOffset = 0
+          state.selectedSlashIndex = 0
+          renderScreen(permissionArgs, state)
           const shouldExit = await handleInput(
             permissionArgs,
             state,
             () => renderScreen(permissionArgs, state),
+            submittedInput,
           )
-          state.input = ''
-          state.cursorOffset = 0
-          state.selectedSlashIndex = 0
           if (shouldExit) {
             finish()
             return
@@ -1200,11 +1278,21 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
     const onData = (chunk: Buffer | string) => {
       const parsed = parseInputChunk(inputRemainder, chunk)
       inputRemainder = parsed.rest
-      void (async () => {
+      eventChain = eventChain.then(async () => {
         for (const event of parsed.events) {
           await handleEvent(event)
         }
-      })()
+      }).catch(error => {
+        pushTranscriptEntry(state, {
+          kind: 'assistant',
+          body: error instanceof Error ? error.message : String(error),
+        })
+        state.input = ''
+        state.cursorOffset = 0
+        state.selectedSlashIndex = 0
+        state.status = null
+        renderScreen(permissionArgs, state)
+      })
     }
 
     const onEnd = () => finish()

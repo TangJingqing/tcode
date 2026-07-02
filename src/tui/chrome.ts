@@ -1,5 +1,6 @@
 import path from 'node:path'
 import process from 'node:process'
+import type { BackgroundTaskResult } from '../tool.js'
 import type { RuntimeConfig } from '../config.js'
 import type { SlashCommand } from '../cli-commands.js'
 import type { PermissionRequest } from '../permissions.js'
@@ -255,6 +256,7 @@ export function renderStatusLine(status: string | null): string {
 export function renderToolPanel(
   activeTool: string | null,
   recentTools: Array<{ name: string; status: 'success' | 'error' }>,
+  backgroundTasks: BackgroundTaskResult[] = [],
 ): string {
   const items: string[] = []
 
@@ -262,7 +264,16 @@ export function renderToolPanel(
     items.push(`${YELLOW}running:${RESET} ${activeTool}`)
   }
 
-  if (recentTools.length === 0) {
+  const runningBackground = backgroundTasks.filter(task => task.status === 'running')
+  if (runningBackground.length > 0) {
+    const label =
+      runningBackground.length === 1
+        ? `1 shell: ${truncatePlain(runningBackground[0]!.command, 48)}`
+        : `${runningBackground.length} shells running`
+    items.push(`${BRIGHT_CYAN}background:${RESET} ${label}`)
+  }
+
+  if (recentTools.length === 0 && runningBackground.length === 0) {
     items.push(`${DIM}recent: none${RESET}`)
     return `${DIM}tools${RESET}  ${items.join('  ')}`
   }
@@ -279,10 +290,16 @@ export function renderFooterBar(
   status: string | null,
   toolsEnabled: boolean,
   skillsEnabled: boolean,
+  backgroundTasks: BackgroundTaskResult[] = [],
 ): string {
   const width = Math.max(60, process.stdout.columns ?? 100)
   const left = renderStatusLine(status)
-  const right = `${DIM}tools${RESET} ${toolsEnabled ? `${GREEN}on${RESET}` : `${RED}off${RESET}`} ${DIM}|${RESET} ${DIM}skills${RESET} ${skillsEnabled ? `${GREEN}on${RESET}` : `${RED}off${RESET}`}`
+  const runningBackground = backgroundTasks.filter(task => task.status === 'running')
+  const backgroundSummary =
+    runningBackground.length > 0
+      ? `${DIM}|${RESET} ${DIM}shells${RESET} ${BRIGHT_CYAN}${runningBackground.length}${RESET}`
+      : ''
+  const right = `${DIM}tools${RESET} ${toolsEnabled ? `${GREEN}on${RESET}` : `${RED}off${RESET}`} ${DIM}|${RESET} ${DIM}skills${RESET} ${skillsEnabled ? `${GREEN}on${RESET}` : `${RED}off${RESET}`}${backgroundSummary}`
   const gap = Math.max(1, width - stringDisplayWidth(left) - stringDisplayWidth(right))
   return `${left}${' '.repeat(gap)}${right}`
 }
@@ -409,7 +426,7 @@ export function renderPermissionPrompt(
       )
     } else if (expanded) {
       promptLines.push(
-        `${DIM}Ctrl+O collapse | Wheel/PgUp/PgDn scroll (${Math.max(
+        `${DIM}Ctrl+O collapse | Wheel/PgUp/PgDn/Alt+Up/Alt+Down scroll (${Math.max(
           0,
           Math.min(scrollOffset, maxScroll),
         )}/${maxScroll})${RESET}`,

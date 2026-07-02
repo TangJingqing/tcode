@@ -9,15 +9,23 @@ function looksLikeClarifyingQuestion(content: string): boolean {
   if (!trimmed) return false
 
   const lower = trimmed.toLowerCase()
-  const asksDirectQuestion =
-    trimmed.endsWith('?') ||
-    trimmed.endsWith('？') ||
-    lower.includes('would you like') ||
-    lower.includes('what would you like') ||
-    trimmed.includes('请告诉我') ||
-    trimmed.includes('请选择')
+  const hasQuestionMark = /[?？]/.test(trimmed)
+  const asksForDecision =
+    /请(?:你|您)?(?:确认|选择|决定|告知|说明|回复)|是否|要不要|可否|行吗|可以吗|你(?:希望|想要)|您(?:希望|想要)|请选择|请告诉我/.test(
+      trimmed,
+    ) ||
+    /would you|do you|which|what would you like|prefer|want|choose|confirm|decide|please provide|let me know/.test(
+      lower,
+    )
+  const asksForMissingInfo =
+    /请(?:提供|补充)|需要你|还需要|缺少|未提供|告诉我/.test(trimmed) ||
+    /provide|share|clarify|missing|need your|tell me/.test(lower)
 
-  if (!asksDirectQuestion) {
+  if (asksForDecision || asksForMissingInfo) {
+    return true
+  }
+
+  if (!hasQuestionMark) {
     return false
   }
 
@@ -32,26 +40,12 @@ function looksLikeClarifyingQuestion(content: string): boolean {
     'want',
     'choose',
     'confirm',
+    'user',
+    'your',
   ]
 
-  const decisionHints = [
-    '希望',
-    '想要',
-    '选择',
-    '确认',
-    '决定',
-    '偏好',
-    'prefer',
-    'want',
-    'choose',
-    'confirm',
-    'decide',
-    'preference',
-  ]
-
-  return (
-    userAddressingHints.some(hint => lower.includes(hint) || trimmed.includes(hint)) &&
-    decisionHints.some(hint => lower.includes(hint) || trimmed.includes(hint))
+  return userAddressingHints.some(
+    hint => lower.includes(hint) || trimmed.includes(hint),
   )
 }
 
@@ -439,6 +433,32 @@ export async function runAgentTurn(args: {
             isError: !result.ok,
           },
         ]
+
+        if (result.awaitUser) {
+          const question = result.output.trim()
+          if (question.length > 0) {
+            await args.tracer?.record(
+              'loop_decision',
+              {
+                decision: 'await_user',
+                toolUseId: call.id,
+                toolName: call.toolName,
+                question,
+              },
+              step,
+            )
+            args.onAssistantMessage?.(question)
+            messages = [
+              ...messages,
+              {
+                role: 'assistant',
+                content: question,
+              },
+            ]
+          }
+
+          return finishTurn(messages, { outcome: 'await_user' })
+        }
       }
     }
 

@@ -1,6 +1,7 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import { z } from 'zod'
+import { registerBackgroundShellTask } from '../background-tasks.js'
 import type { ToolDefinition } from '../tool.js'
 import { resolveToolPath } from '../workspace.js'
 
@@ -35,6 +36,82 @@ type Input = {
   cwd?: string
 }
 
+function splitCommandLine(commandLine: string): string[] {
+  const parts: string[] = []
+  let current = ''
+  let quote: '"' | "'" | null = null
+  let escaping = false
+
+  for (const char of commandLine) {
+    if (escaping) {
+      current += char
+      escaping = false
+      continue
+    }
+
+    if (char === '\\') {
+      escaping = true
+      continue
+    }
+
+    if (quote) {
+      if (char === quote) {
+        quote = null
+      } else {
+        current += char
+      }
+      continue
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char
+      continue
+    }
+
+    if (/\s/.test(char)) {
+      if (current.length > 0) {
+        parts.push(current)
+        current = ''
+      }
+      continue
+    }
+
+    current += char
+  }
+
+  if (escaping) {
+    current += '\\'
+  }
+
+  if (current.length > 0) {
+    parts.push(current)
+  }
+
+  return parts
+}
+
+function normalizeCommandInput(input: Input): {
+  command: string
+  args: string[]
+} {
+  if ((input.args?.length ?? 0) > 0) {
+    return {
+      command: input.command.trim(),
+      args: input.args ?? [],
+    }
+  }
+
+  const trimmed = input.command.trim()
+  if (!trimmed) {
+    return { command: '', args: [] }
+  }
+
+  // Accept single-string invocations like "git status" from the model.
+  const parsed = splitCommandLine(trimmed)
+  const [command = '', ...args] = parsed
+  return { command, args }
+}
+
 // 当 command 内含管道/重定向/变量展开等 shell 语法且未单独传 args 时，走 bash -lc。
 function looksLikeShellSnippet(command: string, args?: string[]): boolean {
   if ((args?.length ?? 0) > 0) {
@@ -42,6 +119,19 @@ function looksLikeShellSnippet(command: string, args?: string[]): boolean {
   }
 
   return /[|&;<>()$`]/.test(command)
+}
+
+function isBackgroundShellSnippet(command: string, args?: string[]): boolean {
+  if ((args?.length ?? 0) > 0) {
+    return false
+  }
+
+  const trimmed = command.trim()
+  return trimmed.endsWith('&') && !trimmed.endsWith('&&')
+}
+
+function stripTrailingBackgroundOperator(command: string): string {
+  return command.trim().replace(/&\s*$/, '').trim()
 }
 
 export const runCommandTool: ToolDefinition<Input> = {
@@ -70,19 +160,52 @@ export const runCommandTool: ToolDefinition<Input> = {
       ? await resolveToolPath(context, input.cwd, 'list')
       : context.cwd
 
-    const useShell = looksLikeShellSnippet(input.command, input.args)
-
-    if (!useShell && !ALLOWLIST.has(input.command)) {
+    const normalized = normalizeCommandInput(input)
+    if (!normalized.command) {
       return {
         ok: false,
-        output: `Command not allowed: ${input.command}`,
+        output: 'Command not allowed: empty command',
       }
     }
 
-    const command = useShell ? 'bash' : input.command
-    const args = useShell ? ['-lc', input.command] : (input.args ?? [])
+    const useShell = looksLikeShellSnippet(input.command, input.args)
+    const backgroundShell = isBackgroundShellSnippet(input.command, input.args)
+
+    if (!useShell && !ALLOWLIST.has(normalized.command)) {
+      return {
+        ok: false,
+        output: `Command not allowed: ${normalized.command}`,
+      }
+    }
+
+    const command = useShell ? 'bash' : normalized.command
+    const args = useShell
+      ? ['-lc', backgroundShell ? stripTrailingBackgroundOperator(input.command) : input.command]
+      : normalized.args
 
     await context.permissions?.ensureCommand(command, args, effectiveCwd)
+
+    if (useShell && backgroundShell) {
+      const child = spawn(command, args, {
+        cwd: effectiveCwd,
+        env: process.env,
+        detached: true,
+        stdio: 'ignore',
+      })
+      child.unref()
+
+      const backgroundTask = registerBackgroundShellTask({
+        command: stripTrailingBackgroundOperator(input.command),
+        pid: child.pid ?? -1,
+        cwd: effectiveCwd,
+      })
+
+      return {
+        ok: true,
+        output: `Background command started.\nTASK: ${backgroundTask.taskId}\nPID: ${backgroundTask.pid}`,
+        backgroundTask,
+      }
+    }
 
     const result = await execFileAsync(command, args, {
       cwd: effectiveCwd,

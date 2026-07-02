@@ -2,6 +2,7 @@ import type { RuntimeConfig } from '../config.js'
 import { createMcpBackedTools } from '../mcp.js'
 import { discoverSkills } from '../skills.js'
 import { ToolRegistry } from '../tool.js'
+import { askUserTool } from './ask-user.js'
 import { editFileTool } from './edit-file.js'
 import { grepFilesTool } from './grep-files.js'
 import { listFilesTool } from './list-files.js'
@@ -24,6 +25,7 @@ export async function createDefaultToolRegistry(args: {
 
   return new ToolRegistry(
     [
+      askUserTool,
       listFilesTool,
       grepFilesTool,
       readFileTool,
