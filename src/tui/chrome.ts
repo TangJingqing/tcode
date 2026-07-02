@@ -114,6 +114,38 @@ function colorBadge(
   return `${color}[${label}]${RESET} ${BOLD}${value}${RESET}`
 }
 
+function joinSegmentsWithinWidth(
+  segments: string[],
+  separator: string,
+  maxWidth: number,
+): string {
+  if (maxWidth <= 0 || segments.length === 0) {
+    return ''
+  }
+
+  let output = ''
+  for (const segment of segments) {
+    const candidate = output.length > 0 ? `${output}${separator}${segment}` : segment
+    if (stringDisplayWidth(candidate) <= maxWidth) {
+      output = candidate
+      continue
+    }
+
+    if (!output) {
+      return truncatePlain(stripAnsi(segment), maxWidth)
+    }
+
+    const withEllipsis = `${output}${separator}${DIM}...${RESET}`
+    if (stringDisplayWidth(withEllipsis) <= maxWidth) {
+      return withEllipsis
+    }
+
+    return output
+  }
+
+  return output
+}
+
 function borderLine(kind: 'top' | 'bottom', width: number): string {
   const inner = Math.max(0, width - 2)
   if (kind === 'top') {
@@ -213,17 +245,20 @@ export function renderBanner(
     mcpCount: 0,
   },
 ): string {
+  const panelWidth = Math.max(60, process.stdout.columns ?? 100)
+  const panelInner = Math.max(0, panelWidth - 4)
   const cwdName = path.basename(cwd) || cwd
   const model = runtime?.model ?? 'not-configured'
   const provider = runtime?.baseUrl
     ? runtime.baseUrl.replace(/^https?:\/\//, '').split('/')[0] || 'custom'
     : 'offline'
-  const projectLine = `${BLUE}${BOLD}${truncatePlain(cwdName, 24)}${RESET} ${DIM}${truncatePathMiddle(cwd, 72)}${RESET}`
+  const pathBudget = Math.max(20, panelInner - 28)
+  const projectLine = `${BLUE}${BOLD}${truncatePlain(cwdName, 24)}${RESET} ${DIM}${truncatePathMiddle(cwd, pathBudget)}${RESET}`
   const permissionLine =
     permissionSummary.length > 0
-      ? `${DIM}${truncatePlain(permissionSummary.join(' | '), 96)}${RESET}`
+      ? `${DIM}${truncatePlain(permissionSummary.join(' | '), Math.max(24, panelInner))}${RESET}`
       : `${DIM}permissions: ask on sensitive actions${RESET}`
-  const metaLine = [
+  const metaBadges = [
     colorBadge('session', 'local', BRIGHT_YELLOW),
     colorBadge('provider', provider, CYAN),
     colorBadge('model', model, GREEN),
@@ -231,7 +266,8 @@ export function renderBanner(
     colorBadge('events', String(session.transcriptCount), BLUE),
     colorBadge('skills', String(session.skillCount), BRIGHT_GREEN),
     colorBadge('mcp', String(session.mcpCount), MAGENTA),
-  ].join('  ')
+  ]
+  const metaLine = joinSegmentsWithinWidth(metaBadges, '  ', panelInner)
 
   return renderPanel(
     'Tcode',

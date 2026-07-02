@@ -42,6 +42,8 @@ tcode 围绕一条实用的终端 agent 闭环构建：
 - `patch_file`
 - `modify_file`
 - `run_command`
+- `web_fetch`
+- `web_search`
 - `ask_user`
 - `load_skill`
 - `list_mcp_resources`

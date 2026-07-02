@@ -13,12 +13,12 @@ type Input = {
 
 export const grepFilesTool: ToolDefinition<Input> = {
   name: 'grep_files',
-  description: 'Search for text in files using ripgrep.',
+  description: '使用 ripgrep 在文件中搜索文本。',
   inputSchema: {
     type: 'object',
     properties: {
-      pattern: { type: 'string' },
-      path: { type: 'string' },
+      pattern: { type: 'string', description: '要搜索的文本或正则表达式。' },
+      path: { type: 'string', description: '搜索范围路径，默认当前工作区。' },
     },
     required: ['pattern'],
   },

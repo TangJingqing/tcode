@@ -17,19 +17,20 @@ type Input = {
 
 export const patchFileTool: ToolDefinition<Input> = {
   name: 'patch_file',
-  description: 'Apply multiple exact-text replacements to one file in a single operation.',
+  description: '在单次操作中对一个文件应用多个精确文本替换。',
   inputSchema: {
     type: 'object',
     properties: {
-      path: { type: 'string' },
+      path: { type: 'string', description: '要修改的文件路径。' },
       replacements: {
         type: 'array',
+        description: '要依次应用的替换列表。',
         items: {
           type: 'object',
           properties: {
-            search: { type: 'string' },
-            replace: { type: 'string' },
-            replaceAll: { type: 'boolean' },
+            search: { type: 'string', description: '要查找的精确原文。' },
+            replace: { type: 'string', description: '用于替换的新文本。' },
+            replaceAll: { type: 'boolean', description: '是否替换所有匹配项，默认只替换第一个。' },
           },
           required: ['search', 'replace'],
         },

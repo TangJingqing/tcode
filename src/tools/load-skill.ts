@@ -10,11 +10,11 @@ export function createLoadSkillTool(cwd: string): ToolDefinition<Input> {
   return {
     name: 'load_skill',
     description:
-      'Load the full contents of a named SKILL.md file so you can follow that workflow accurately.',
+      '加载指定 SKILL.md 的完整内容，以便准确遵循对应工作流。',
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string' },
+        name: { type: 'string', description: '要加载的 skill 名称。' },
       },
       required: ['name'],
     },

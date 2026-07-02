@@ -8,11 +8,11 @@ type Input = {
 export const askUserTool: ToolDefinition<Input> = {
   name: 'ask_user',
   description:
-    'Ask the user a clarifying question and stop the current turn until the user replies.',
+    '向用户提出澄清问题，并暂停当前回合直到用户回复。',
   inputSchema: {
     type: 'object',
     properties: {
-      question: { type: 'string' },
+      question: { type: 'string', description: '要询问用户的问题。' },
     },
     required: ['question'],
   },

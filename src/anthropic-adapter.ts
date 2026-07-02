@@ -2,6 +2,10 @@ import type { ToolRegistry } from './tool.js'
 import type { ChatMessage, ModelAdapter, StepDiagnostics, ToolCall } from './types.js'
 import type { RuntimeConfig } from './config.js'
 
+const DEFAULT_MAX_RETRIES = 4
+const BASE_RETRY_DELAY_MS = 500
+const MAX_RETRY_DELAY_MS = 8_000
+
 type AnthropicContentBlock =
   | { type: 'text'; text: string }
   | { type: 'tool_use'; id: string; name: string; input: unknown }
@@ -11,6 +15,77 @@ type AnthropicContentBlock =
 type AnthropicMessage = {
   role: 'user' | 'assistant'
   content: AnthropicContentBlock[]
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => {
+    setTimeout(resolve, Math.max(0, ms))
+  })
+}
+
+function getRetryLimit(): number {
+  const value = Number(process.env.TCODE_MAX_RETRIES)
+  if (!Number.isFinite(value) || value < 0) {
+    return DEFAULT_MAX_RETRIES
+  }
+  return Math.floor(value)
+}
+
+function shouldRetryStatus(status: number): boolean {
+  return status === 429 || (status >= 500 && status < 600)
+}
+
+function parseRetryAfterMs(retryAfter: string | null): number | null {
+  if (!retryAfter) return null
+  const asSeconds = Number(retryAfter)
+  if (Number.isFinite(asSeconds) && asSeconds >= 0) {
+    return Math.floor(asSeconds * 1000)
+  }
+
+  const at = Date.parse(retryAfter)
+  if (!Number.isFinite(at)) {
+    return null
+  }
+  return Math.max(0, at - Date.now())
+}
+
+function getRetryDelayMs(attempt: number, retryAfterMs: number | null): number {
+  if (retryAfterMs !== null) {
+    return retryAfterMs
+  }
+  const base = Math.min(
+    BASE_RETRY_DELAY_MS * Math.pow(2, Math.max(0, attempt - 1)),
+    MAX_RETRY_DELAY_MS,
+  )
+  const jitter = Math.random() * 0.25 * base
+  return Math.floor(base + jitter)
+}
+
+async function readJsonBody(response: Response): Promise<unknown> {
+  const text = await response.text()
+  if (!text.trim()) {
+    return {}
+  }
+  try {
+    return JSON.parse(text)
+  } catch {
+    return { error: { message: text.trim() } }
+  }
+}
+
+function extractErrorMessage(data: unknown, status: number): string {
+  if (
+    typeof data === 'object' &&
+    data !== null &&
+    'error' in data &&
+    typeof data.error === 'object' &&
+    data.error !== null &&
+    'message' in data.error &&
+    typeof data.error.message === 'string'
+  ) {
+    return data.error.message
+  }
+  return `Model request failed: ${status}`
 }
 
 function isTextBlock(block: AnthropicContentBlock): block is Extract<AnthropicContentBlock, {
@@ -195,24 +270,42 @@ export class AnthropicModelAdapter implements ModelAdapter {
       context.stepIndex,
     )
 
-    let response: Response
+    let response: Response | null = null
     let data: {
       error?: { message?: string }
       stop_reason?: string
       content?: AnthropicContentBlock[]
-    }
+    } | null = null
 
     try {
-      response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
-      })
+      const maxRetries = getRetryLimit()
+      for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+        response = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(requestBody),
+        })
 
-      data = (await response.json()) as {
-        error?: { message?: string }
-        stop_reason?: string
-        content?: AnthropicContentBlock[]
+        data = (await readJsonBody(response)) as {
+          error?: { message?: string }
+          stop_reason?: string
+          content?: AnthropicContentBlock[]
+        }
+
+        if (response.ok) {
+          break
+        }
+
+        if (!shouldRetryStatus(response.status) || attempt >= maxRetries) {
+          break
+        }
+
+        const retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'))
+        await sleep(getRetryDelayMs(attempt + 1, retryAfterMs))
+      }
+
+      if (!response || !data) {
+        throw new Error('Model request failed before receiving a response')
       }
     } catch (error) {
       await context?.tracer?.record(
@@ -239,7 +332,7 @@ export class AnthropicModelAdapter implements ModelAdapter {
     )
 
     if (!response.ok) {
-      throw new Error(data.error?.message || `Model request failed: ${response.status}`)
+      throw new Error(extractErrorMessage(data, response.status))
     }
 
     const toolCalls: ToolCall[] = []

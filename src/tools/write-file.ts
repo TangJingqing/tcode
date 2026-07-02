@@ -10,12 +10,12 @@ type Input = {
 
 export const writeFileTool: ToolDefinition<Input> = {
   name: 'write_file',
-  description: 'Write a UTF-8 text file relative to the workspace root.',
+  description: '写入相对于工作区根目录的 UTF-8 文本文件。',
   inputSchema: {
     type: 'object',
     properties: {
-      path: { type: 'string' },
-      content: { type: 'string' },
+      path: { type: 'string', description: '要写入的文件路径。' },
+      content: { type: 'string', description: '完整的文件内容。' },
     },
     required: ['path', 'content'],
   },

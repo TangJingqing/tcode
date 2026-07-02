@@ -13,14 +13,14 @@ type Input = {
 
 export const editFileTool: ToolDefinition<Input> = {
   name: 'edit_file',
-  description: 'Edit a text file by replacing exact text.',
+  description: '通过精确文本替换来编辑文本文件。',
   inputSchema: {
     type: 'object',
     properties: {
-      path: { type: 'string' },
-      search: { type: 'string' },
-      replace: { type: 'string' },
-      replaceAll: { type: 'boolean' },
+      path: { type: 'string', description: '要编辑的文件路径。' },
+      search: { type: 'string', description: '要查找的精确原文。' },
+      replace: { type: 'string', description: '用于替换的新文本。' },
+      replaceAll: { type: 'boolean', description: '是否替换所有匹配项，默认只替换第一个。' },
     },
     required: ['path', 'search', 'replace'],
   },

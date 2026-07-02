@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "tsx src/index.ts",
+    "check": "tsc --noEmit",
     "install-cli": "tsx src/install.ts"
   },
   "dependencies": {

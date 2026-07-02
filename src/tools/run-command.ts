@@ -155,16 +155,17 @@ function stripTrailingBackgroundOperator(command: string): string {
 export const runCommandTool: ToolDefinition<Input> = {
   name: 'run_command',
   description:
-    'Run a common development command from an allowlist. For shell pipelines or variable expansion, pass the full snippet in command and tcode will run it via bash -lc.',
+    '运行常见开发命令。需要 shell 管道、重定向或变量展开时，把完整片段放在 command 中，tcode 会通过 bash -lc 执行。',
   inputSchema: {
     type: 'object',
     properties: {
-      command: { type: 'string' },
+      command: { type: 'string', description: '要执行的命令，或完整 shell 片段。' },
       args: {
         type: 'array',
+        description: '命令参数列表。传入 args 时不会自动按 shell 片段解析 command。',
         items: { type: 'string' },
       },
-      cwd: { type: 'string' },
+      cwd: { type: 'string', description: '命令执行目录，默认当前工作区。' },
     },
     required: ['command'],
   },

@@ -15,13 +15,13 @@ const MAX_READ_LIMIT = 20000
 export const readFileTool: ToolDefinition<Input> = {
   name: 'read_file',
   description:
-    'Read a UTF-8 text file relative to the workspace root. Large files can be read in chunks via offset and limit.',
+    '读取相对于工作区根目录的 UTF-8 文本文件。大文件可通过 offset 和 limit 分块读取。',
   inputSchema: {
     type: 'object',
     properties: {
-      path: { type: 'string' },
-      offset: { type: 'number' },
-      limit: { type: 'number' },
+      path: { type: 'string', description: '要读取的文件路径。' },
+      offset: { type: 'number', description: '从第几个字符开始读取，默认 0。' },
+      limit: { type: 'number', description: '最多返回多少个字符。' },
     },
     required: ['path'],
   },

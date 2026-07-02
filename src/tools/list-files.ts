@@ -9,11 +9,11 @@ type Input = {
 
 export const listFilesTool: ToolDefinition<Input> = {
   name: 'list_files',
-  description: 'List files in a directory relative to the workspace root.',
+  description: '列出相对于工作区根目录的目录内容。',
   inputSchema: {
     type: 'object',
     properties: {
-      path: { type: 'string' },
+      path: { type: 'string', description: '要列出的目录路径，默认当前工作区。' },
     },
   },
   schema: z.object({

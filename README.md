@@ -66,6 +66,8 @@ tcode is a good fit if you want:
 - `patch_file`
 - `modify_file`
 - `run_command`
+- `web_fetch`
+- `web_search`
 - `ask_user`
 - `load_skill`
 - `list_mcp_resources`

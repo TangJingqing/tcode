@@ -10,12 +10,12 @@ type Input = {
 
 export const modifyFileTool: ToolDefinition<Input> = {
   name: 'modify_file',
-  description: 'Replace a file with reviewed content so the user can approve the diff first.',
+  description: '用完整内容替换文件，并先展示 diff 供用户审批。',
   inputSchema: {
     type: 'object',
     properties: {
-      path: { type: 'string' },
-      content: { type: 'string' },
+      path: { type: 'string', description: '要修改的文件路径。' },
+      content: { type: 'string', description: '替换后的完整文件内容。' },
     },
     required: ['path', 'content'],
   },
