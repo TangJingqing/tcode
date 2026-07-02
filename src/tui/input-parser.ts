@@ -51,7 +51,11 @@ function maybeNeedMoreForEscapeSequence(input: string): boolean {
   if (!input.startsWith(ESC)) return false
 
   if (input === ESC) return true
-  if (input.startsWith('\u001b[') && !/^\u001b\[[<\d;?]*[~A-Za-zMm]$/.test(input)) {
+  // Wait only for known-incomplete CSI prefixes.
+  // If an unexpected character appears (for example "\u001b[\r"), do not
+  // block the parser forever; let parseEscapeSequence fall back.
+  if (input === '\u001b[') return true
+  if (/^\u001b\[[<\d;?]*$/.test(input)) {
     return true
   }
   if (input.startsWith('\u001bO') && input.length < 3) {

@@ -9,7 +9,6 @@ import {
 import { loadHistoryEntries, saveHistoryEntries } from './history.js'
 import { parseLocalToolShortcut } from './local-tool-shortcuts.js'
 import {
-  PermissionDecision,
   PermissionManager,
   PermissionRequest,
   PermissionPromptResult,
@@ -173,6 +172,54 @@ function jumpTranscriptToEdge(
   }
 
   state.transcriptScrollOffset = nextOffset
+  return true
+}
+
+function getPendingApprovalMaxScrollOffset(state: ScreenState): number {
+  const pending = state.pendingApproval
+  if (!pending) return 0
+  return getPermissionPromptMaxScrollOffset(pending.request, {
+    expanded: pending.detailsExpanded,
+  })
+}
+
+function scrollPendingApprovalBy(state: ScreenState, delta: number): boolean {
+  const pending = state.pendingApproval
+  if (!pending || !pending.detailsExpanded) {
+    return false
+  }
+
+  const maxOffset = getPendingApprovalMaxScrollOffset(state)
+  const nextOffset = Math.max(
+    0,
+    Math.min(maxOffset, pending.detailsScrollOffset + delta),
+  )
+  if (nextOffset === pending.detailsScrollOffset) {
+    return false
+  }
+  pending.detailsScrollOffset = nextOffset
+  return true
+}
+
+function togglePendingApprovalExpand(state: ScreenState): boolean {
+  const pending = state.pendingApproval
+  if (!pending || pending.request.kind !== 'edit') {
+    return false
+  }
+  pending.detailsExpanded = !pending.detailsExpanded
+  pending.detailsScrollOffset = 0
+  return true
+}
+
+function movePendingApprovalSelection(state: ScreenState, delta: number): boolean {
+  const pending = state.pendingApproval
+  if (!pending || pending.feedbackMode) {
+    return false
+  }
+  const total = pending.request.choices.length
+  if (total <= 0) return false
+  pending.selectedChoiceIndex =
+    (pending.selectedChoiceIndex + delta + total) % total
   return true
 }
 
@@ -869,6 +916,7 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
     let finished = false
     let inputRemainder = ''
     let eventChain = Promise.resolve()
+    let submitInFlight = false
 
     const cleanup = () => {
       process.stdin.off('data', onData)
@@ -893,145 +941,158 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
     const handleEvent = async (event: ParsedInputEvent) => {
       try {
         if (state.pendingApproval) {
-          const pending = state.pendingApproval
+          if (event.kind === 'text' && event.ctrl && event.text === 'o') {
+            if (togglePendingApprovalExpand(state)) {
+              renderScreen(permissionArgs, state)
+            }
+            return
+          }
 
-          // 反馈子模式：采集自由文本并回传给模型。
-          if (pending.feedbackMode) {
-            if (event.kind === 'key' && event.name === 'escape') {
+          if (event.kind === 'text' && event.ctrl && event.text === 'c') {
+            finish()
+            return
+          }
+
+          if (event.kind === 'wheel') {
+            if (
+              event.direction === 'up'
+                ? scrollPendingApprovalBy(state, -3)
+                : scrollPendingApprovalBy(state, 3)
+            ) {
+              renderScreen(permissionArgs, state)
+            }
+            return
+          }
+
+          if (event.kind === 'key' && event.name === 'pageup') {
+            if (scrollPendingApprovalBy(state, -8)) {
+              renderScreen(permissionArgs, state)
+            }
+            return
+          }
+
+          if (event.kind === 'key' && event.name === 'pagedown') {
+            if (scrollPendingApprovalBy(state, 8)) {
+              renderScreen(permissionArgs, state)
+            }
+            return
+          }
+
+          if (event.kind === 'key' && event.name === 'up' && event.meta) {
+            if (scrollPendingApprovalBy(state, -1)) {
+              renderScreen(permissionArgs, state)
+            }
+            return
+          }
+
+          if (event.kind === 'key' && event.name === 'down' && event.meta) {
+            if (scrollPendingApprovalBy(state, 1)) {
+              renderScreen(permissionArgs, state)
+            }
+            return
+          }
+
+          if (event.kind === 'key' && event.name === 'up' && !event.meta) {
+            if (movePendingApprovalSelection(state, -1)) {
+              renderScreen(permissionArgs, state)
+            }
+            return
+          }
+
+          if (event.kind === 'key' && event.name === 'down' && !event.meta) {
+            if (movePendingApprovalSelection(state, 1)) {
+              renderScreen(permissionArgs, state)
+            }
+            return
+          }
+
+          if (event.kind === 'key' && event.name === 'backspace') {
+            const pending = state.pendingApproval
+            if (pending.feedbackMode && pending.feedbackInput.length > 0) {
+              pending.feedbackInput = pending.feedbackInput.slice(0, -1)
+              renderScreen(permissionArgs, state)
+            }
+            return
+          }
+
+          if (event.kind === 'text' && !event.ctrl && !event.meta) {
+            const pending = state.pendingApproval
+            if (!pending.feedbackMode) {
+              const pressed = event.text.trim().toLowerCase()
+              const matched = pending.request.choices.find(
+                choice => choice.key.toLowerCase() === pressed,
+              )
+              if (matched) {
+                if (matched.decision === 'deny_with_feedback') {
+                  pending.feedbackMode = true
+                  pending.feedbackInput = ''
+                  renderScreen(permissionArgs, state)
+                  return
+                }
+
+                state.pendingApproval = null
+                state.status = null
+                pending.resolve({ decision: matched.decision })
+                renderScreen(permissionArgs, state)
+                return
+              }
+            }
+
+            if (pending.feedbackMode) {
+              pending.feedbackInput += event.text
+              renderScreen(permissionArgs, state)
+            }
+            return
+          }
+
+          if (event.kind === 'key' && event.name === 'return') {
+            const pending = state.pendingApproval
+            if (pending.feedbackMode) {
+              const feedback = pending.feedbackInput.trim()
+              state.pendingApproval = null
+              state.status = null
+              pending.resolve({
+                decision: 'deny_with_feedback',
+                feedback,
+              })
+              renderScreen(permissionArgs, state)
+              return
+            }
+
+            const selected =
+              pending.request.choices[
+                Math.min(
+                  pending.selectedChoiceIndex,
+                  pending.request.choices.length - 1,
+                )
+              ]
+            if (!selected) {
+              return
+            }
+
+            if (selected.decision === 'deny_with_feedback') {
+              pending.feedbackMode = true
+              pending.feedbackInput = ''
+              renderScreen(permissionArgs, state)
+              return
+            }
+
+            state.pendingApproval = null
+            state.status = null
+            pending.resolve({ decision: selected.decision })
+            renderScreen(permissionArgs, state)
+            return
+          }
+
+          if (event.kind === 'key' && event.name === 'escape') {
+            const pending = state.pendingApproval
+            if (pending.feedbackMode) {
               pending.feedbackMode = false
               pending.feedbackInput = ''
               renderScreen(permissionArgs, state)
               return
             }
 
-            if (event.kind === 'key' && event.name === 'return') {
-              const feedback = pending.feedbackInput.trim()
-              state.pendingApproval = null
-              state.status = null
-              pending.resolve({ decision: 'deny_with_feedback', feedback })
-              renderScreen(permissionArgs, state)
-              return
-            }
-
-            if (event.kind === 'key' && event.name === 'backspace') {
-              if (pending.feedbackInput.length > 0) {
-                pending.feedbackInput = pending.feedbackInput.slice(0, -1)
-                renderScreen(permissionArgs, state)
-              }
-              return
-            }
-
-            if (event.kind === 'text' && !event.ctrl && !event.meta) {
-              pending.feedbackInput += event.text
-              renderScreen(permissionArgs, state)
-            }
-
-            return
-          }
-
-          // 控制组合键加字母键可切换完整差异视图（仅编辑请求可用）。
-          if (event.kind === 'text' && event.ctrl && event.text === 'o') {
-            if (pending.request.kind === 'edit') {
-              pending.detailsExpanded = !pending.detailsExpanded
-              pending.detailsScrollOffset = 0
-              renderScreen(permissionArgs, state)
-            }
-            return
-          }
-
-          // 在展开的差异视图中使用滚轮、上翻页或下翻页进行滚动。
-          if (pending.detailsExpanded) {
-            const scrollBy = (delta: number): void => {
-              const maxOffset = getPermissionPromptMaxScrollOffset(pending.request, {
-                expanded: true,
-              })
-              const next = Math.max(
-                0,
-                Math.min(maxOffset, pending.detailsScrollOffset + delta),
-              )
-              if (next !== pending.detailsScrollOffset) {
-                pending.detailsScrollOffset = next
-                renderScreen(permissionArgs, state)
-              }
-            }
-
-            if (event.kind === 'wheel') {
-              scrollBy(event.direction === 'up' ? -3 : 3)
-              return
-            }
-            if (event.kind === 'key' && event.name === 'pageup') {
-              scrollBy(-8)
-              return
-            }
-            if (event.kind === 'key' && event.name === 'pagedown') {
-              scrollBy(8)
-              return
-            }
-            if (event.kind === 'key' && event.name === 'up' && event.meta) {
-              scrollBy(-1)
-              return
-            }
-            if (event.kind === 'key' && event.name === 'down' && event.meta) {
-              scrollBy(1)
-              return
-            }
-          }
-
-          // 方向键导航：移动当前选中项。
-          if (
-            event.kind === 'key' &&
-            (event.name === 'up' || event.name === 'down') &&
-            !event.meta
-          ) {
-            const total = pending.request.choices.length
-            if (total > 0) {
-              const delta = event.name === 'up' ? -1 : 1
-              pending.selectedChoiceIndex =
-                (pending.selectedChoiceIndex + delta + total) % total
-              renderScreen(permissionArgs, state)
-            }
-            return
-          }
-
-          // 处理所选项；若为反馈选项则切换到文本反馈子模式。
-          const applyChoice = (decision: PermissionDecision): void => {
-            if (decision === 'deny_with_feedback') {
-              pending.feedbackMode = true
-              pending.feedbackInput = ''
-              renderScreen(permissionArgs, state)
-              return
-            }
-            state.pendingApproval = null
-            state.status = null
-            pending.resolve({ decision })
-            renderScreen(permissionArgs, state)
-          }
-
-          // 字母快捷键：无论当前选中项为何，都可直接选择对应选项。
-          const keyChar = event.kind === 'text' && !event.ctrl && !event.meta ? event.text : ''
-          const choice = pending.request.choices.find(item => item.key === keyChar)
-          if (choice) {
-            applyChoice(choice.decision)
-            return
-          }
-
-          // 回车确认当前选中项。
-          if (event.kind === 'key' && event.name === 'return') {
-            const total = pending.request.choices.length
-            const selected =
-              total > 0
-                ? pending.request.choices[
-                    ((pending.selectedChoiceIndex % total) + total) % total
-                  ]
-                : undefined
-            if (selected) {
-              applyChoice(selected.decision)
-            }
-            return
-          }
-
-          // 退出键执行“仅拒绝一次”。
-          if (event.kind === 'key' && event.name === 'escape') {
             state.pendingApproval = null
             state.status = null
             pending.resolve({ decision: 'deny_once' })
@@ -1088,17 +1149,37 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
           state.cursorOffset = 0
           state.selectedSlashIndex = 0
           renderScreen(permissionArgs, state)
-          const shouldExit = await handleInput(
-            permissionArgs,
-            state,
-            () => renderScreen(permissionArgs, state),
-            submittedInput,
-          )
-          if (shouldExit) {
-            finish()
+          if (submitInFlight) {
             return
           }
-          renderScreen(permissionArgs, state)
+          submitInFlight = true
+          void (async () => {
+            try {
+              const shouldExit = await handleInput(
+                permissionArgs,
+                state,
+                () => renderScreen(permissionArgs, state),
+                submittedInput,
+              )
+              if (shouldExit) {
+                finish()
+                return
+              }
+              renderScreen(permissionArgs, state)
+            } catch (error) {
+              pushTranscriptEntry(state, {
+                kind: 'assistant',
+                body: error instanceof Error ? error.message : String(error),
+              })
+              state.input = ''
+              state.cursorOffset = 0
+              state.selectedSlashIndex = 0
+              state.status = null
+              renderScreen(permissionArgs, state)
+            } finally {
+              submitInFlight = false
+            }
+          })()
           return
         }
 

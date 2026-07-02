@@ -7,15 +7,29 @@ import { resolveToolPath } from '../workspace.js'
 
 const execFileAsync = promisify(execFile)
 
-const ALLOWLIST = new Set([
+// Claude Code separates "read-only shell commands" from mutating/runtime commands.
+// We keep the same shape here so safe observability commands are easy to extend.
+const READONLY_COMMANDS = new Set([
   'pwd',
   'ls',
   'find',
   'rg',
-  'cat',
-  'echo',
-  'env',
   'grep',
+  'cat',
+  'head',
+  'tail',
+  'wc',
+  'sed',
+  'echo',
+  'df',
+  'du',
+  'free',
+  'uname',
+  'uptime',
+  'whoami',
+])
+
+const DEVELOPMENT_COMMANDS = new Set([
   'git',
   'npm',
   'node',
@@ -24,11 +38,15 @@ const ALLOWLIST = new Set([
   'bun',
   'bash',
   'sh',
-  'sed',
-  'head',
-  'tail',
-  'wc',
 ])
+
+function isAllowedCommand(command: string): boolean {
+  return READONLY_COMMANDS.has(command) || DEVELOPMENT_COMMANDS.has(command)
+}
+
+function isReadOnlyCommand(command: string): boolean {
+  return READONLY_COMMANDS.has(command)
+}
 
 type Input = {
   command: string
@@ -171,19 +189,25 @@ export const runCommandTool: ToolDefinition<Input> = {
     const useShell = looksLikeShellSnippet(input.command, input.args)
     const backgroundShell = isBackgroundShellSnippet(input.command, input.args)
 
-    if (!useShell && !ALLOWLIST.has(normalized.command)) {
-      return {
-        ok: false,
-        output: `Command not allowed: ${normalized.command}`,
-      }
-    }
+    const knownCommand = isAllowedCommand(normalized.command)
 
     const command = useShell ? 'bash' : normalized.command
     const args = useShell
       ? ['-lc', backgroundShell ? stripTrailingBackgroundOperator(input.command) : input.command]
       : normalized.args
 
-    await context.permissions?.ensureCommand(command, args, effectiveCwd)
+    const forcePromptReason =
+      !useShell && !knownCommand
+        ? `Unknown command '${normalized.command}' is not in the built-in read-only/development set`
+        : undefined
+
+    if (forcePromptReason) {
+      await context.permissions?.ensureCommand(command, args, effectiveCwd, {
+        forcePromptReason,
+      })
+    } else if (useShell || !isReadOnlyCommand(normalized.command)) {
+      await context.permissions?.ensureCommand(command, args, effectiveCwd)
+    }
 
     if (useShell && backgroundShell) {
       const child = spawn(command, args, {

@@ -190,9 +190,9 @@
           <pre><code>$ tcode
 
 ╭─ tcode ─────────────────────────╮
-│ cwd: ~/project                  │
-│ tools: files, command, ask_user │
-│ skills: 2   mcp: 1   trace: on │
+│ cwd: ~/project                   │
+│ tools: files, command, ask_user  │
+│ skills: 2   mcp: 1   trace: on  │
 ╰─────────────────────────────────╯
 
 You: add a config option and verify it
@@ -208,7 +208,7 @@ tcode: running type check...</code></pre>
           <h2>Small Enough To Study</h2>
           <p>
             The core loop stays compact while supporting progress, tool calls,
-            clarifying questions, retries, and final responses.
+            structured user clarification via ask_user, retries, and final responses.
           </p>
         </article>
 
@@ -217,16 +217,16 @@ tcode: running type check...</code></pre>
           <h2>Review Before Writes</h2>
           <p>
             File edits, external paths, and risky commands flow through explicit
-            permission and review boundaries.
+            permission and review boundaries with responsive approval controls.
           </p>
         </article>
 
         <article class="card">
           <span class="tag">Extensions</span>
-          <h2>Skills And MCP</h2>
+          <h2>Toolchain, Skills And MCP</h2>
           <p>
-            Local skills and stdio MCP servers add workflows and tools without
-            making the core runtime heavyweight.
+            Single-string commands like git status, local skills, and stdio MCP
+            servers all plug into the same standardized tool protocol.
           </p>
         </article>
       </section>
