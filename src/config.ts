@@ -1,14 +1,17 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { isEnoentError } from './utils/errors.js'
 
 export type McpServerConfig = {
   command: string
   args?: string[]
   env?: Record<string, string | number>
+  url?: string
+  headers?: Record<string, string | number>
   cwd?: string
   enabled?: boolean
-  protocol?: 'auto' | 'content-length' | 'newline-json'
+  protocol?: 'auto' | 'content-length' | 'newline-json' | 'streamable-http'
 }
 
 export type TraceSettings = {
@@ -48,6 +51,7 @@ export const TCODE_SETTINGS_PATH = path.join(TCODE_DIR, 'settings.json')
 export const TCODE_HISTORY_PATH = path.join(TCODE_DIR, 'history.json')
 export const TCODE_PERMISSIONS_PATH = path.join(TCODE_DIR, 'permissions.json')
 export const TCODE_MCP_PATH = path.join(TCODE_DIR, 'mcp.json')
+export const TCODE_MCP_TOKENS_PATH = path.join(TCODE_DIR, 'mcp-tokens.json')
 export const CLAUDE_SETTINGS_PATH = path.join(os.homedir(), '.claude', 'settings.json')
 export const PROJECT_MCP_PATH = path.join(process.cwd(), '.mcp.json')
 
@@ -56,20 +60,36 @@ async function readSettingsFile(filePath: string): Promise<TcodeSettings> {
     const content = await readFile(filePath, 'utf8')
     return JSON.parse(content) as TcodeSettings
   } catch (error) {
-    const code =
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      typeof error.code === 'string'
-        ? error.code
-        : ''
-
-    if (code === 'ENOENT') {
+    if (isEnoentError(error)) {
       return {}
     }
 
     throw error
   }
+}
+
+export async function readMcpTokensFile(
+  filePath = TCODE_MCP_TOKENS_PATH,
+): Promise<Record<string, string>> {
+  try {
+    const content = await readFile(filePath, 'utf8')
+    const parsed = JSON.parse(content) as unknown
+    if (typeof parsed !== 'object' || parsed === null) {
+      return {}
+    }
+    return parsed as Record<string, string>
+  } catch (error) {
+    if (isEnoentError(error)) return {}
+    throw error
+  }
+}
+
+export async function saveMcpTokensFile(
+  tokens: Record<string, string>,
+  filePath = TCODE_MCP_TOKENS_PATH,
+): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true })
+  await writeFile(filePath, `${JSON.stringify(tokens, null, 2)}\n`, 'utf8')
 }
 
 // 读取独立的 mcp.json（全局或项目级），只取其中的 mcpServers 字段。
@@ -91,15 +111,7 @@ export async function readMcpConfigFile(
 
     return parsed.mcpServers as Record<string, McpServerConfig>
   } catch (error) {
-    const code =
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      typeof error.code === 'string'
-        ? error.code
-        : ''
-
-    if (code === 'ENOENT') {
+    if (isEnoentError(error)) {
       return {}
     }
 
@@ -151,6 +163,10 @@ function mergeSettings(
       env: {
         ...(mergedMcpServers[name]?.env ?? {}),
         ...(server.env ?? {}),
+      },
+      headers: {
+        ...(mergedMcpServers[name]?.headers ?? {}),
+        ...(server.headers ?? {}),
       },
     }
   }

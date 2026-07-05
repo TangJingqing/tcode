@@ -28,8 +28,9 @@ tcode 围绕一条实用的终端 agent 闭环构建：
 - 卡片式 header、session feed、prompt、approval、activity 和 footer 面板
 - 输入历史、会话滚动和 slash command 菜单
 - 通过 `SKILL.md` 发现本地 skills
-- 通过 stdio 动态加载 MCP 工具
+- 通过 stdio 或 streamable HTTP 动态加载 MCP 工具
 - 通过通用 MCP helper 工具读取 MCP resources 和 prompts
+- MCP 非阻塞启动，并在 UI 中显示 connecting / ready / error 状态
 - 可选 Langfuse / OpenTelemetry agent tracing
 
 ### 内置工具
@@ -133,7 +134,9 @@ TCODE_MODEL_MODE=mock npm start
 ### 管理命令
 
 - `tcode mcp list`
-- `tcode mcp add <name> [--project] [--protocol <mode>] [--env KEY=VALUE ...] -- <command> [args...]`
+- `tcode mcp add <name> [--project] [--protocol <mode>] [--url <endpoint>] [--header KEY=VALUE ...] [--env KEY=VALUE ...] [-- <command> [args...]]`
+- `tcode mcp login <name> --token <bearer-token>`
+- `tcode mcp logout <name>`
 - `tcode mcp remove <name> [--project]`
 - `tcode skills list`
 - `tcode skills add <path> [--name <name>] [--project]`
@@ -195,7 +198,7 @@ TCODE_TRACE=1 npm start
 - `src/agent-loop.ts`: 多步模型和工具循环
 - `src/tool.ts`: 工具注册和执行
 - `src/skills.ts`: 本地 skill 发现和加载
-- `src/mcp.ts`: stdio MCP client 和动态工具封装
+- `src/mcp.ts`: stdio / streamable HTTP MCP client 和动态工具封装
 - `src/manage-cli.ts`: `tcode mcp` / `tcode skills` 管理命令
 - `src/tools/*`: 内置工具
 - `src/tui/*`: 终端 UI 模块

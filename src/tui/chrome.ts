@@ -237,12 +237,18 @@ export function renderBanner(
     transcriptCount: number
     messageCount: number
     skillCount: number
-    mcpCount: number
+    mcpTotalCount: number
+    mcpConnectedCount: number
+    mcpConnectingCount: number
+    mcpErrorCount: number
   } = {
     transcriptCount: 0,
     messageCount: 0,
     skillCount: 0,
-    mcpCount: 0,
+    mcpTotalCount: 0,
+    mcpConnectedCount: 0,
+    mcpConnectingCount: 0,
+    mcpErrorCount: 0,
   },
 ): string {
   const panelWidth = Math.max(60, process.stdout.columns ?? 100)
@@ -265,7 +271,17 @@ export function renderBanner(
     colorBadge('messages', String(session.messageCount), BRIGHT_CYAN),
     colorBadge('events', String(session.transcriptCount), BLUE),
     colorBadge('skills', String(session.skillCount), BRIGHT_GREEN),
-    colorBadge('mcp', String(session.mcpCount), MAGENTA),
+    colorBadge(
+      'mcp',
+      `${session.mcpConnectedCount}/${session.mcpTotalCount}`,
+      MAGENTA,
+    ),
+    ...(session.mcpConnectingCount > 0
+      ? [colorBadge('mcp-wait', String(session.mcpConnectingCount), YELLOW)]
+      : []),
+    ...(session.mcpErrorCount > 0
+      ? [colorBadge('mcp-err', String(session.mcpErrorCount), BRIGHT_RED)]
+      : []),
   ]
   const metaLine = joinSegmentsWithinWidth(metaBadges, '  ', panelInner)
 
@@ -326,6 +342,19 @@ export function renderFooterBar(
   status: string | null,
   toolsEnabled: boolean,
   skillsEnabled: boolean,
+  mcpStatus: {
+    total: number
+    connected: number
+    connecting: number
+    error: number
+    toolCount: number
+  } = {
+    total: 0,
+    connected: 0,
+    connecting: 0,
+    error: 0,
+    toolCount: 0,
+  },
   backgroundTasks: BackgroundTaskResult[] = [],
 ): string {
   const width = Math.max(60, process.stdout.columns ?? 100)
@@ -335,8 +364,16 @@ export function renderFooterBar(
     runningBackground.length > 0
       ? `${DIM}|${RESET} ${DIM}shells${RESET} ${BRIGHT_CYAN}${runningBackground.length}${RESET}`
       : ''
-  const right = `${DIM}tools${RESET} ${toolsEnabled ? `${GREEN}on${RESET}` : `${RED}off${RESET}`} ${DIM}|${RESET} ${DIM}skills${RESET} ${skillsEnabled ? `${GREEN}on${RESET}` : `${RED}off${RESET}`}${backgroundSummary}`
-  const gap = Math.max(1, width - stringDisplayWidth(left) - stringDisplayWidth(right))
+  const mcpSummary =
+    mcpStatus.total === 0
+      ? `${DIM}mcp${RESET} ${DIM}none${RESET}`
+      : mcpStatus.connecting > 0
+        ? `${DIM}mcp srv${RESET} ${YELLOW}${mcpStatus.connected}/${mcpStatus.total} ready, ${mcpStatus.connecting} connecting${mcpStatus.toolCount > 0 ? `, ${mcpStatus.toolCount} tools` : ''}${RESET}`
+        : mcpStatus.error > 0
+          ? `${DIM}mcp srv${RESET} ${BRIGHT_RED}${mcpStatus.connected}/${mcpStatus.total} ready, ${mcpStatus.error} err${mcpStatus.toolCount > 0 ? `, ${mcpStatus.toolCount} tools` : ''}${RESET}`
+          : `${DIM}mcp srv${RESET} ${GREEN}${mcpStatus.connected}/${mcpStatus.total} ready${mcpStatus.toolCount > 0 ? `, ${mcpStatus.toolCount} tools` : ''}${RESET}`
+  const right = `${DIM}tools${RESET} ${toolsEnabled ? `${GREEN}on${RESET}` : `${RED}off${RESET}`} ${DIM}|${RESET} ${DIM}skills${RESET} ${skillsEnabled ? `${GREEN}on${RESET}` : `${RED}off${RESET}`} ${DIM}|${RESET} ${mcpSummary}${backgroundSummary}`
+  const gap = Math.max(1, width - stripAnsi(left).length - stripAnsi(right).length)
   return `${left}${' '.repeat(gap)}${right}`
 }
 

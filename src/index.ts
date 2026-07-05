@@ -8,10 +8,11 @@ import {
 } from './cli-commands.js'
 import { loadRuntimeConfig } from './config.js'
 import { maybeHandleManagementCommand } from './manage-cli.js'
+import { summarizeMcpServers } from './mcp-status.js'
 import { MockModelAdapter } from './mock-model.js'
 import { PermissionManager } from './permissions.js'
 import { buildSystemPrompt } from './prompt.js'
-import { createDefaultToolRegistry } from './tools/index.js'
+import { createDefaultToolRegistry, hydrateMcpTools } from './tools/index.js'
 import type { ChatMessage } from './types.js'
 import { renderBanner } from './ui.js'
 import { runTtyApp } from './tty-app.js'
@@ -19,10 +20,11 @@ import { runAgentTurn } from './agent-loop.js'
 import { createAgentTracer, resolveTraceConfig } from './tracing.js'
 
 async function main(): Promise<void> {
+  const cwd = process.cwd()
   const isInteractiveTerminal = Boolean(process.stdin.isTTY && process.stdout.isTTY)
 
   const argv = process.argv.slice(2)
-  if (await maybeHandleManagementCommand(process.cwd(), argv)) {
+  if (await maybeHandleManagementCommand(cwd, argv)) {
     return
   }
 
@@ -34,10 +36,17 @@ async function main(): Promise<void> {
   }
 
   const tools = await createDefaultToolRegistry({
-    cwd: process.cwd(),
+    cwd,
     runtime,
   })
-  const permissions = new PermissionManager(process.cwd())
+  const mcpHydration = hydrateMcpTools({
+    cwd,
+    runtime,
+    tools,
+  }).catch(() => {
+    // Keep startup resilient even if some MCP servers fail.
+  })
+  const permissions = new PermissionManager(cwd)
   await permissions.whenReady()
   const traceSettings = runtime?.trace
   const tracer = createAgentTracer({
@@ -62,12 +71,22 @@ async function main(): Promise<void> {
   let messages: ChatMessage[] = [
     {
       role: 'system',
-      content: await buildSystemPrompt(process.cwd(), permissions.getSummary(), {
+      content: await buildSystemPrompt(cwd, permissions.getSummary(), {
         skills: tools.getSkills(),
         mcpServers: tools.getMcpServers(),
       }),
     },
   ]
+
+  async function refreshSystemPrompt(): Promise<void> {
+    messages[0] = {
+      role: 'system',
+      content: await buildSystemPrompt(cwd, permissions.getSummary(), {
+        skills: tools.getSkills(),
+        mcpServers: tools.getMcpServers(),
+      }),
+    }
+  }
 
   try {
     if (isInteractiveTerminal) {
@@ -76,14 +95,25 @@ async function main(): Promise<void> {
         tools,
         model,
         messages,
-        cwd: process.cwd(),
+        cwd,
         permissions,
         tracer,
       })
       return
     }
 
-    console.log(renderBanner(runtime, process.cwd(), permissions.getSummary()))
+    const mcpStatus = summarizeMcpServers(tools.getMcpServers())
+    console.log(
+      renderBanner(runtime, cwd, permissions.getSummary(), {
+        transcriptCount: 0,
+        messageCount: messages.length,
+        skillCount: tools.getSkills().length,
+        mcpTotalCount: mcpStatus.total,
+        mcpConnectedCount: mcpStatus.connected,
+        mcpConnectingCount: mcpStatus.connecting,
+        mcpErrorCount: mcpStatus.error,
+      }),
+    )
     console.log('')
 
     const rl = readline.createInterface({
@@ -132,13 +162,7 @@ async function main(): Promise<void> {
         continue
       }
 
-      messages[0] = {
-        role: 'system',
-        content: await buildSystemPrompt(process.cwd(), permissions.getSummary(), {
-          skills: tools.getSkills(),
-          mcpServers: tools.getMcpServers(),
-        }),
-      }
+      await refreshSystemPrompt()
       messages = [...messages, { role: 'user', content: input }]
       permissions.beginTurn()
       try {
@@ -146,7 +170,7 @@ async function main(): Promise<void> {
           model,
           tools,
           messages,
-          cwd: process.cwd(),
+          cwd,
           permissions,
           maxSteps: 8,
           tracer,
@@ -180,6 +204,7 @@ async function main(): Promise<void> {
       // 在输入结束的收尾阶段忽略重复关闭。
     }
   } finally {
+    await mcpHydration
     await tracer.flush()
     await tools.dispose()
   }

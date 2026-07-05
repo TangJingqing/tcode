@@ -8,13 +8,6 @@ export type ToolContext = {
   permissions?: PermissionManager
 }
 
-export type ToolResult = {
-  ok: boolean
-  output: string
-  backgroundTask?: BackgroundTaskResult
-  awaitUser?: boolean
-}
-
 export type BackgroundTaskResult = {
   taskId: string
   type: 'local_bash'
@@ -22,6 +15,13 @@ export type BackgroundTaskResult = {
   pid: number
   status: 'running' | 'completed' | 'failed'
   startedAt: number
+}
+
+export type ToolResult = {
+  ok: boolean
+  output: string
+  backgroundTask?: BackgroundTaskResult
+  awaitUser?: boolean
 }
 
 export type ToolDefinition<TInput> = {
@@ -38,26 +38,58 @@ type ToolRegistryMetadata = {
 }
 
 export class ToolRegistry {
+  private readonly toolsStore: ToolDefinition<unknown>[]
+  private metadataStore: ToolRegistryMetadata
+  private readonly disposers: Array<() => Promise<void>> = []
+
   constructor(
-    private readonly tools: ToolDefinition<unknown>[],
-    private readonly metadata: ToolRegistryMetadata = {},
-    private readonly disposer?: () => Promise<void>,
-  ) {}
+    tools: ToolDefinition<unknown>[],
+    metadata: ToolRegistryMetadata = {},
+    disposer?: () => Promise<void>,
+  ) {
+    this.toolsStore = [...tools]
+    this.metadataStore = metadata
+    if (disposer) {
+      this.disposers.push(disposer)
+    }
+  }
 
   list(): ToolDefinition<unknown>[] {
-    return this.tools
+    return this.toolsStore
   }
 
   getSkills(): SkillSummary[] {
-    return this.metadata.skills ?? []
+    return this.metadataStore.skills ?? []
   }
 
   getMcpServers(): McpServerSummary[] {
-    return this.metadata.mcpServers ?? []
+    return this.metadataStore.mcpServers ?? []
+  }
+
+  setMcpServers(servers: McpServerSummary[]): void {
+    this.metadataStore = {
+      ...this.metadataStore,
+      mcpServers: [...servers],
+    }
+  }
+
+  addTools(nextTools: ToolDefinition<unknown>[]): void {
+    const existingNames = new Set(this.toolsStore.map(tool => tool.name))
+    for (const tool of nextTools) {
+      if (existingNames.has(tool.name)) {
+        continue
+      }
+      this.toolsStore.push(tool)
+      existingNames.add(tool.name)
+    }
+  }
+
+  addDisposer(disposer: () => Promise<void>): void {
+    this.disposers.push(disposer)
   }
 
   find(name: string): ToolDefinition<unknown> | undefined {
-    return this.tools.find(tool => tool.name === name)
+    return this.toolsStore.find(tool => tool.name === name)
   }
 
   async execute(
@@ -92,6 +124,6 @@ export class ToolRegistry {
   }
 
   async dispose(): Promise<void> {
-    await this.disposer?.()
+    await Promise.all(this.disposers.map(disposer => disposer()))
   }
 }

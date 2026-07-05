@@ -8,6 +8,7 @@ import {
 } from './cli-commands.js'
 import { loadHistoryEntries, saveHistoryEntries } from './history.js'
 import { parseLocalToolShortcut } from './local-tool-shortcuts.js'
+import { summarizeMcpServers } from './mcp-status.js'
 import {
   PermissionManager,
   PermissionRequest,
@@ -83,11 +84,15 @@ type TranscriptEntryDraft =
   | Omit<Extract<TranscriptEntry, { kind: 'tool' }>, 'id'>
 
 function getSessionStats(args: TtyAppArgs, state: ScreenState) {
+  const mcpStatus = summarizeMcpServers(args.tools.getMcpServers())
   return {
     transcriptCount: state.transcript.length,
     messageCount: args.messages.length,
     skillCount: args.tools.getSkills().length,
-    mcpCount: args.tools.getMcpServers().length,
+    mcpTotalCount: mcpStatus.total,
+    mcpConnectedCount: mcpStatus.connected,
+    mcpConnectingCount: mcpStatus.connecting,
+    mcpErrorCount: mcpStatus.error,
   }
 }
 
@@ -488,6 +493,7 @@ function renderScreen(args: TtyAppArgs, state: ScreenState): void {
         state.status,
         true,
         args.tools.getSkills().length > 0,
+        summarizeMcpServers(args.tools.getMcpServers()),
         backgroundTasks,
       ),
     )
@@ -519,6 +525,7 @@ function renderScreen(args: TtyAppArgs, state: ScreenState): void {
       state.status,
       true,
       args.tools.getSkills().length > 0,
+      summarizeMcpServers(args.tools.getMcpServers()),
       backgroundTasks,
     ),
   )

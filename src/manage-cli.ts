@@ -2,8 +2,11 @@ import process from 'node:process'
 import {
   type McpConfigScope,
   type McpServerConfig,
+  TCODE_MCP_TOKENS_PATH,
   getMcpConfigPath,
   loadScopedMcpServers,
+  readMcpTokensFile,
+  saveMcpTokensFile,
   saveScopedMcpServers,
 } from './config.js'
 import { discoverSkills, installSkill, removeManagedSkill } from './skills.js'
@@ -12,7 +15,9 @@ function printUsage(): void {
   console.log(`tcode management commands
 
 tcode mcp list [--project]
-tcode mcp add <name> [--project] [--protocol <auto|content-length|newline-json>] [--env KEY=VALUE ...] -- <command> [args...]
+tcode mcp add <name> [--project] [--protocol <auto|content-length|newline-json|streamable-http>] [--url <endpoint>] [--header KEY=VALUE ...] [--env KEY=VALUE ...] [-- <command> [args...]]
+tcode mcp login <name> --token <bearer-token>
+tcode mcp logout <name>
 tcode mcp remove <name> [--project]
 
 tcode skills list
@@ -93,41 +98,52 @@ async function handleMcpCommand(cwd: string, args: string[]): Promise<boolean> {
     }
 
     for (const [name, server] of Object.entries(servers)) {
-      const argsSummary = server.args?.join(' ') ?? ''
+      const endpoint =
+        server.url?.trim() ||
+        `${server.command ?? ''} ${server.args?.join(' ') ?? ''}`.trim()
       const protocol = server.protocol ? ` protocol=${server.protocol}` : ''
-      console.log(`${name}: ${server.command} ${argsSummary}${protocol}`.trim())
+      console.log(`${name}: ${endpoint}${protocol}`.trim())
     }
     return true
   }
 
   if (subcommand === 'add') {
     const separatorIndex = rest.indexOf('--')
-    if (separatorIndex === -1) {
-      throw new Error('Use `--` before the MCP command. Example: tcode mcp add MiniMax -- uvx minimax-coding-plan-mcp -y')
-    }
-
-    const head = rest.slice(0, separatorIndex)
-    const commandParts = rest.slice(separatorIndex + 1)
+    const head = separatorIndex === -1 ? [...rest] : rest.slice(0, separatorIndex)
+    const commandParts = separatorIndex === -1 ? [] : rest.slice(separatorIndex + 1)
     const name = head.shift()
     if (!name) {
       throw new Error('Missing MCP server name.')
     }
-    if (commandParts.length === 0) {
-      throw new Error('Missing MCP command after `--`.')
-    }
 
     const protocol = takeOption(head, '--protocol') as McpServerConfig['protocol']
+    const url = takeOption(head, '--url')?.trim()
     const env = parseEnvPairs(takeRepeatOption(head, '--env'))
+    const headers = parseEnvPairs(takeRepeatOption(head, '--header'))
     if (head.length > 0) {
       throw new Error(`Unknown arguments: ${head.join(' ')}`)
     }
 
-    const [command, ...commandArgs] = commandParts
+    const hasUrl = Boolean(url)
+    const hasCommand = commandParts.length > 0
+    if (hasUrl && hasCommand) {
+      throw new Error('Cannot set both --url and local command. Choose one.')
+    }
+    if (!hasUrl && !hasCommand) {
+      throw new Error('Missing MCP command or --url.')
+    }
+    if (protocol === 'streamable-http' && !hasUrl) {
+      throw new Error('Protocol streamable-http requires --url.')
+    }
+
+    const [command = '', ...commandArgs] = commandParts
     const existing = await loadScopedMcpServers(scope, cwd)
     existing[name] = {
       command,
-      args: commandArgs,
+      args: hasCommand ? commandArgs : undefined,
       env: Object.keys(env).length > 0 ? env : undefined,
+      url: hasUrl ? url : undefined,
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
       protocol,
     }
     await saveScopedMcpServers(scope, existing, cwd)
@@ -148,6 +164,41 @@ async function handleMcpCommand(cwd: string, args: string[]): Promise<boolean> {
     delete existing[name]
     await saveScopedMcpServers(scope, existing, cwd)
     console.log(`Removed MCP server ${name} from ${getMcpConfigPath(scope, cwd)}`)
+    return true
+  }
+
+  if (subcommand === 'login') {
+    const name = rest[0]
+    if (!name) {
+      throw new Error('Missing MCP server name.')
+    }
+    const token = takeOption(rest, '--token')?.trim()
+    if (!token) {
+      throw new Error('Missing --token value.')
+    }
+    if (rest.length > 1) {
+      throw new Error(`Unknown arguments: ${rest.slice(1).join(' ')}`)
+    }
+    const tokens = await readMcpTokensFile()
+    tokens[name] = token
+    await saveMcpTokensFile(tokens)
+    console.log(`Stored MCP token for ${name} in ${TCODE_MCP_TOKENS_PATH}`)
+    return true
+  }
+
+  if (subcommand === 'logout') {
+    const name = rest[0]
+    if (!name) {
+      throw new Error('Missing MCP server name.')
+    }
+    const tokens = await readMcpTokensFile()
+    if (!(name in tokens)) {
+      console.log(`No token found for ${name} in ${TCODE_MCP_TOKENS_PATH}`)
+      return true
+    }
+    delete tokens[name]
+    await saveMcpTokensFile(tokens)
+    console.log(`Removed MCP token for ${name} from ${TCODE_MCP_TOKENS_PATH}`)
     return true
   }
 

@@ -52,8 +52,9 @@ tcode is a good fit if you want:
 - card-style header, session feed, prompt, approval, activity, and footer panels
 - input history, transcript scrolling, and slash command menu
 - discoverable local skills via `SKILL.md`
-- dynamic MCP tool loading over stdio
+- dynamic MCP tool loading over stdio or streamable HTTP
 - MCP resources and prompts via generic MCP helper tools
+- non-blocking MCP startup with connecting / ready / error status in the UI
 - optional agent-loop tracing with Langfuse / OpenTelemetry support
 
 ### Built-in tools
@@ -156,7 +157,9 @@ TCODE_MODEL_MODE=mock npm start
 ### Management commands
 
 - `tcode mcp list`
-- `tcode mcp add <name> [--project] [--protocol <mode>] [--env KEY=VALUE ...] -- <command> [args...]`
+- `tcode mcp add <name> [--project] [--protocol <mode>] [--url <endpoint>] [--header KEY=VALUE ...] [--env KEY=VALUE ...] [-- <command> [args...]]`
+- `tcode mcp login <name> --token <bearer-token>`
+- `tcode mcp logout <name>`
 - `tcode mcp remove <name> [--project]`
 - `tcode skills list`
 - `tcode skills add <path> [--name <name>] [--project]`
@@ -229,6 +232,8 @@ For vendor compatibility, tcode auto-negotiates stdio framing:
 - standard MCP `Content-Length` framing is tried first
 - if that fails, tcode falls back to newline-delimited JSON
 - you can force a mode per server with `"protocol": "content-length"` or `"protocol": "newline-json"`
+- remote MCP endpoints can use `"url"`, `"headers"`, and `"protocol": "streamable-http"`
+- negotiated stdio protocols are cached under `~/.tcode/mcp-protocol-cache.json`
 
 Skills are discovered from:
 
@@ -286,6 +291,13 @@ Install a user-scoped MCP server:
 
 ```bash
 tcode mcp add MiniMax --env MINIMAX_API_KEY=your-key --env MINIMAX_API_HOST=https://api.minimaxi.com -- uvx minimax-coding-plan-mcp -y
+```
+
+Install a remote streamable HTTP MCP server:
+
+```bash
+tcode mcp add remote-tools --protocol streamable-http --url https://example.com/mcp
+tcode mcp login remote-tools --token your-bearer-token
 ```
 
 List configured MCP servers:
@@ -355,7 +367,7 @@ to inspect the current trace status.
 - `src/agent-loop.ts`: multi-step model/tool loop
 - `src/tool.ts`: tool registry and execution
 - `src/skills.ts`: local skill discovery and loading
-- `src/mcp.ts`: stdio MCP client and dynamic tool wrapping
+- `src/mcp.ts`: stdio / streamable HTTP MCP clients and dynamic tool wrapping
 - `src/manage-cli.ts`: top-level `tcode mcp` / `tcode skills` management commands
 - `src/tools/*`: built-in tools
 - `src/tui/*`: terminal UI modules
