@@ -37,8 +37,11 @@ import {
 } from './ui.js'
 import type { RuntimeConfig } from './config.js'
 import type { ToolRegistry } from './tool.js'
-import type { ChatMessage, ModelAdapter } from './types.js'
+import type { ChatMessage, CompressionResult, ModelAdapter } from './types.js'
 import type { AgentTracer } from './tracing.js'
+import type { ContextStats } from './utils/token-estimator.js'
+import { computeContextStats } from './utils/token-estimator.js'
+import { manualCompact } from './compact/manual-compact.js'
 
 type TtyAppArgs = {
   runtime: RuntimeConfig | null
@@ -75,6 +78,8 @@ type ScreenState = {
   nextEntryId: number
   pendingApproval: PendingApproval | null
   isBusy: boolean
+  contextStats: ContextStats | null
+  compressionStatus: string | null
 }
 
 type TranscriptEntryDraft =
@@ -93,6 +98,7 @@ function getSessionStats(args: TtyAppArgs, state: ScreenState) {
     mcpConnectedCount: mcpStatus.connected,
     mcpConnectingCount: mcpStatus.connecting,
     mcpErrorCount: mcpStatus.error,
+    contextStats: state.contextStats,
   }
 }
 
@@ -495,6 +501,7 @@ function renderScreen(args: TtyAppArgs, state: ScreenState): void {
         args.tools.getSkills().length > 0,
         summarizeMcpServers(args.tools.getMcpServers()),
         backgroundTasks,
+        state.compressionStatus,
       ),
     )
     return
@@ -527,6 +534,7 @@ function renderScreen(args: TtyAppArgs, state: ScreenState): void {
       args.tools.getSkills().length > 0,
       summarizeMcpServers(args.tools.getMcpServers()),
       backgroundTasks,
+      state.compressionStatus,
     ),
   )
 }
@@ -610,6 +618,61 @@ async function handleInput(
   if (!input) return false
   if (input === '/exit') return true
 
+  // /compact: manual context compression
+  if (input === '/compact') {
+    if (args.messages.length <= 2) {
+      pushTranscriptEntry(state, {
+        kind: 'assistant',
+        body: 'Not enough conversation to compress.',
+      })
+      return false
+    }
+    const model = args.runtime?.model ?? ''
+    if (!model) {
+      pushTranscriptEntry(state, {
+        kind: 'assistant',
+        body: 'No model configured. Set a model with /model or configure one in settings.',
+      })
+      return false
+    }
+    state.status = 'Compressing context...'
+    state.isBusy = true
+    rerender()
+    try {
+      const result = await manualCompact(args.messages, args.model)
+      if (result) {
+        args.messages.length = 0
+        args.messages.push(...result.messages)
+        const saved = Math.round(
+          (1 - result.tokensAfter / result.tokensBefore) * 100,
+        )
+        const savedTokens = result.tokensBefore - result.tokensAfter
+        state.compressionStatus = `Saved ${saved}% (${savedTokens} tokens)`
+        state.contextStats = computeContextStats(args.messages, model)
+        pushTranscriptEntry(state, {
+          kind: 'assistant',
+          body: `Context compressed. Removed ${result.removedCount} messages (saved ${saved}% tokens, ${savedTokens} tokens).`,
+        })
+      } else {
+        state.compressionStatus = 'Compression skipped (not enough context)'
+        pushTranscriptEntry(state, {
+          kind: 'assistant',
+          body: 'Context compression was not needed or the model was unable to produce a summary.',
+        })
+      }
+    } catch {
+      state.compressionStatus = 'Compression failed'
+      pushTranscriptEntry(state, {
+        kind: 'assistant',
+        body: 'Context compression failed. Try again or continue working.',
+      })
+    } finally {
+      state.isBusy = false
+      state.status = null
+    }
+    return false
+  }
+
   if (state.history.at(-1) !== input) {
     state.history.push(input)
     await saveHistoryEntries(state.history)
@@ -679,6 +742,7 @@ async function handleInput(
   const aggregatedEditByEntryId = new Map<number, AggregatedEditProgress>()
   const aggregatedEditByKey = new Map<string, AggregatedEditProgress>()
 
+  const model = args.runtime?.model ?? ''
   args.permissions.beginTurn()
   try {
     const nextMessages = await runAgentTurn({
@@ -689,6 +753,18 @@ async function handleInput(
       permissions: args.permissions,
       maxSteps: 8,
       tracer: args.tracer,
+      modelName: model,
+      onAutoCompact(result: CompressionResult) {
+        state.compressionStatus = `Auto-compressed: -${result.removedCount} msgs`
+        state.contextStats = computeContextStats(args.messages, model)
+        pushTranscriptEntry(state, {
+          kind: 'assistant',
+          body: `Auto-compressed context: removed ${result.removedCount} messages (saved ${Math.round((1 - result.tokensAfter / result.tokensBefore) * 100)}% tokens).`,
+        })
+      },
+      onContextStats(stats: ContextStats) {
+        state.contextStats = stats
+      },
       onAssistantMessage(content) {
         pushTranscriptEntry(state, {
           kind: 'assistant',
@@ -904,6 +980,8 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
     nextEntryId: 1,
     pendingApproval: null,
     isBusy: false,
+    contextStats: null,
+    compressionStatus: null,
   }
   state.historyIndex = state.history.length
 

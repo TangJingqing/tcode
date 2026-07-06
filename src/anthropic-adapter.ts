@@ -235,6 +235,13 @@ function toAnthropicMessages(messages: ChatMessage[]): {
       continue
     }
 
+    if (message.role === 'context_summary') {
+      pushAnthropicMessage(converted, 'user', toTextBlock(
+        `[Context Summary from earlier conversation]\n${message.content}`,
+      ))
+      continue
+    }
+
     pushAnthropicMessage(converted, 'user', {
       type: 'tool_result',
       tool_use_id: message.toolUseId,

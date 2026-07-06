@@ -146,6 +146,27 @@ function joinSegmentsWithinWidth(
   return output
 }
 
+export function renderContextBadge(stats: {
+  utilization: number
+  warningLevel: 'normal' | 'warning' | 'critical' | 'blocked'
+}): string {
+  const { utilization, warningLevel } = stats
+  const percent = Math.round(utilization * 100)
+
+  const colorMap = {
+    normal: GREEN,
+    warning: YELLOW,
+    critical: RED,
+    blocked: BRIGHT_RED,
+  }
+  const color = colorMap[warningLevel]
+
+  const filled = Math.round(utilization * 10)
+  const bar = '▓'.repeat(filled) + '░'.repeat(10 - filled)
+
+  return colorBadge('ctx', `${percent}% ${bar}`, color)
+}
+
 function borderLine(kind: 'top' | 'bottom', width: number): string {
   const inner = Math.max(0, width - 2)
   if (kind === 'top') {
@@ -241,6 +262,10 @@ export function renderBanner(
     mcpConnectedCount: number
     mcpConnectingCount: number
     mcpErrorCount: number
+    contextStats?: {
+      utilization: number
+      warningLevel: 'normal' | 'warning' | 'critical' | 'blocked'
+    } | null
   } = {
     transcriptCount: 0,
     messageCount: 0,
@@ -282,6 +307,7 @@ export function renderBanner(
     ...(session.mcpErrorCount > 0
       ? [colorBadge('mcp-err', String(session.mcpErrorCount), BRIGHT_RED)]
       : []),
+    ...(session.contextStats ? [renderContextBadge(session.contextStats)] : []),
   ]
   const metaLine = joinSegmentsWithinWidth(metaBadges, '  ', panelInner)
 
@@ -356,6 +382,7 @@ export function renderFooterBar(
     toolCount: 0,
   },
   backgroundTasks: BackgroundTaskResult[] = [],
+  compressionStatus?: string | null,
 ): string {
   const width = Math.max(60, process.stdout.columns ?? 100)
   const left = renderStatusLine(status)
@@ -372,7 +399,10 @@ export function renderFooterBar(
         : mcpStatus.error > 0
           ? `${DIM}mcp srv${RESET} ${BRIGHT_RED}${mcpStatus.connected}/${mcpStatus.total} ready, ${mcpStatus.error} err${mcpStatus.toolCount > 0 ? `, ${mcpStatus.toolCount} tools` : ''}${RESET}`
           : `${DIM}mcp srv${RESET} ${GREEN}${mcpStatus.connected}/${mcpStatus.total} ready${mcpStatus.toolCount > 0 ? `, ${mcpStatus.toolCount} tools` : ''}${RESET}`
-  const right = `${DIM}tools${RESET} ${toolsEnabled ? `${GREEN}on${RESET}` : `${RED}off${RESET}`} ${DIM}|${RESET} ${DIM}skills${RESET} ${skillsEnabled ? `${GREEN}on${RESET}` : `${RED}off${RESET}`} ${DIM}|${RESET} ${mcpSummary}${backgroundSummary}`
+  const compressionPart = compressionStatus
+    ? `${DIM}|${RESET} ${YELLOW}${compressionStatus}${RESET}`
+    : ''
+  const right = `${DIM}tools${RESET} ${toolsEnabled ? `${GREEN}on${RESET}` : `${RED}off${RESET}`} ${DIM}|${RESET} ${DIM}skills${RESET} ${skillsEnabled ? `${GREEN}on${RESET}` : `${RED}off${RESET}`} ${DIM}|${RESET} ${mcpSummary}${backgroundSummary}${compressionPart}`
   const gap = Math.max(1, width - stripAnsi(left).length - stripAnsi(right).length)
   return `${left}${' '.repeat(gap)}${right}`
 }

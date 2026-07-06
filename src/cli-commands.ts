@@ -67,6 +67,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: 'Show agent loop trace status and output path.',
   },
   {
+    name: '/compact',
+    usage: '/compact',
+    description: 'Compress conversation context to free up context window space.',
+  },
+  {
     name: '/exit',
     usage: '/exit',
     description: 'Exit tcode.',

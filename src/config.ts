@@ -46,7 +46,9 @@ export type RuntimeConfig = {
   sourceSummary: string
 }
 
-export const TCODE_DIR = path.join(os.homedir(), '.tcode')
+export const TCODE_DIR = process.env.TCODE_HOME
+  ? path.resolve(process.env.TCODE_HOME)
+  : path.join(os.homedir(), '.tcode')
 export const TCODE_SETTINGS_PATH = path.join(TCODE_DIR, 'settings.json')
 export const TCODE_HISTORY_PATH = path.join(TCODE_DIR, 'history.json')
 export const TCODE_PERMISSIONS_PATH = path.join(TCODE_DIR, 'permissions.json')

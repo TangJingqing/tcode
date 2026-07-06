@@ -89,7 +89,9 @@ async function main(): Promise<void> {
     })
 
     const home = os.homedir()
-    const targetBinDir = path.join(home, '.local', 'bin')
+    const targetBinDir = process.env.TCODE_BIN_DIR
+      ? path.resolve(process.env.TCODE_BIN_DIR)
+      : path.join(home, '.local', 'bin')
     const launcherPath = path.join(targetBinDir, 'tcode')
     const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const launcherScript = [

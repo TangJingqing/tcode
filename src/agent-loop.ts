@@ -1,8 +1,11 @@
 import type { ToolRegistry } from './tool.js'
-import type { ChatMessage, ModelAdapter } from './types.js'
+import type { ChatMessage, CompressionResult, ModelAdapter } from './types.js'
 import type { PermissionManager } from './permissions.js'
 import type { AgentTracer } from './tracing.js'
 import { summarizeAgentStep, summarizeMessages } from './tracing.js'
+import { microcompact } from './compact/microcompact.js'
+import { autoCompact } from './compact/auto-compact.js'
+import { computeContextStats } from './utils/token-estimator.js'
 
 function looksLikeClarifyingQuestion(content: string): boolean {
   const trimmed = content.trim()
@@ -127,8 +130,12 @@ export async function runAgentTurn(args: {
   onAssistantMessage?: (content: string) => void
   onProgressMessage?: (content: string) => void
   tracer?: AgentTracer
+  modelName?: string
+  onAutoCompact?: (result: CompressionResult) => void
+  onContextStats?: (stats: import('./utils/token-estimator.js').ContextStats) => void
 }): Promise<ChatMessage[]> {
   const maxSteps = args.maxSteps ?? 6
+  const modelName = args.modelName ?? ''
   let messages = args.messages
   let emptyResponseRetryCount = 0
   let recoverableThinkingRetryCount = 0
@@ -163,6 +170,31 @@ export async function runAgentTurn(args: {
 
   try {
     for (let step = 0; step < maxSteps; step++) {
+      // Microcompact: lightweight tool_result cleanup on every step
+      if (modelName) {
+        messages = microcompact(messages, modelName)
+      }
+
+      // AutoCompact: LLM-based compression when context is critical
+      // step=0 always checks; mid-turn checks if utilization jumped into critical zone
+      if (modelName) {
+        const stats = computeContextStats(messages, modelName)
+        args.onContextStats?.(stats)
+        const shouldCheck =
+          step === 0 ||
+          stats.warningLevel === 'critical' ||
+          stats.warningLevel === 'blocked'
+        if (shouldCheck) {
+          const result = await autoCompact(messages, modelName, args.model)
+          if (result) {
+            messages = result.messages
+            args.onAutoCompact?.(result)
+            const updatedStats = computeContextStats(messages, modelName)
+            args.onContextStats?.(updatedStats)
+          }
+        }
+      }
+
       await args.tracer?.record(
         'model_input',
         {
