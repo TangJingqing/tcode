@@ -4,7 +4,7 @@
 
 A lightweight terminal coding assistant for local development workflows.
 
-tcode follows the same compact, terminal-first design style as MiniCode: it keeps the core coding-agent loop small enough to study and customize, while still supporting practical file tools, permissions, local skills, MCP tools, and agent tracing.
+it keeps the core coding-agent loop small enough to study and customize, while still supporting practical file tools, permissions, local skills, MCP tools, and agent tracing.
 
 ## Overview
 
