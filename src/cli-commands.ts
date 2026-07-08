@@ -72,6 +72,26 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: 'Compress conversation context to free up context window space.',
   },
   {
+    name: '/resume',
+    usage: '/resume',
+    description: 'Resume a saved session (interactive picker, or /resume <id>).',
+  },
+  {
+    name: '/rename',
+    usage: '/rename <name>',
+    description: 'Rename the current session.',
+  },
+  {
+    name: '/new',
+    usage: '/new',
+    description: 'Clear saved session and start fresh.',
+  },
+  {
+    name: '/fork',
+    usage: '/fork',
+    description: 'Fork current session into a new independent session.',
+  },
+  {
     name: '/exit',
     usage: '/exit',
     description: 'Exit tcode.',

@@ -9,6 +9,7 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "check": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
     "install-cli": "tsx src/install.ts"
   },
   "dependencies": {

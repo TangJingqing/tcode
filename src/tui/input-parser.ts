@@ -31,20 +31,24 @@ type ParsedInputEvent =
       direction: 'up' | 'down'
     }
 
+function isMultilinePasteChunk(input: string): boolean {
+  return /[\r\n]/.test(input) && /[^\r\n]/.test(input)
+}
+
 type ParseResult = {
   events: ParsedInputEvent[]
   rest: string
 }
 
-const ESC = '\u001b'
+const ESC = ''
 const CTRL_CHAR_TO_NAME: Record<string, string> = {
-  '\u0001': 'a',
-  '\u0003': 'c',
-  '\u0005': 'e',
-  '\u000e': 'n',
-  '\u000f': 'o',
-  '\u0010': 'p',
-  '\u0015': 'u',
+  '': 'a',
+  '': 'c',
+  '': 'e',
+  '': 'n',
+  '': 'o',
+  '': 'p',
+  '': 'u',
 }
 
 function maybeNeedMoreForEscapeSequence(input: string): boolean {
@@ -52,13 +56,13 @@ function maybeNeedMoreForEscapeSequence(input: string): boolean {
 
   if (input === ESC) return true
   // Wait only for known-incomplete CSI prefixes.
-  // If an unexpected character appears (for example "\u001b[\r"), do not
+  // If an unexpected character appears (for example "[\r"), do not
   // block the parser forever; let parseEscapeSequence fall back.
-  if (input === '\u001b[') return true
-  if (/^\u001b\[[<\d;?]*$/.test(input)) {
+  if (input === '[') return true
+  if (/^\[[<\d;?]*$/.test(input)) {
     return true
   }
-  if (input.startsWith('\u001bO') && input.length < 3) {
+  if (input.startsWith('O') && input.length < 3) {
     return true
   }
 
@@ -69,7 +73,7 @@ function parseEscapeSequence(input: string): {
   event: ParsedInputEvent | null
   length: number
 } | null {
-  let match = /^\u001b\[<(\d+);(\d+);(\d+)([Mm])/.exec(input)
+  let match = /^\[<(\d+);(\d+);(\d+)([Mm])/.exec(input)
   if (match) {
     const button = Number(match[1])
     const length = match[0].length
@@ -82,7 +86,7 @@ function parseEscapeSequence(input: string): {
     return { event: null, length }
   }
 
-  if (/^\u001b\[M.../.test(input)) {
+  if (/^\[M.../.test(input)) {
     const seq = input.slice(0, 6)
     const button = seq.charCodeAt(3) - 32
     if ((button & 0x43) === 0x40) {
@@ -94,7 +98,7 @@ function parseEscapeSequence(input: string): {
     return { event: null, length: 6 }
   }
 
-  match = /^\u001b\[(?:1;(\d+))?([ABCDHF])/.exec(input)
+  match = /^\[(?:1;(\d+))?([ABCDHF])/.exec(input)
   if (match) {
     const modifier = Number(match[1] ?? '1')
     const meta = modifier === 3
@@ -118,7 +122,7 @@ function parseEscapeSequence(input: string): {
     }
   }
 
-  match = /^\u001b\[(\d+)~/.exec(input)
+  match = /^\[(\d+)~/.exec(input)
   if (match) {
     const nameMap: Record<string, ParsedKeyName> = {
       '1': 'home',
@@ -137,7 +141,7 @@ function parseEscapeSequence(input: string): {
     }
   }
 
-  match = /^\u001bO([ABCDHF])/.exec(input)
+  match = /^O([ABCDHF])/.exec(input)
   if (match) {
     const nameMap: Record<string, ParsedKeyName> = {
       A: 'up',
@@ -158,7 +162,7 @@ function parseEscapeSequence(input: string): {
     }
   }
 
-  if (input.startsWith('\u001b\t')) {
+  if (input.startsWith('\t')) {
     return {
       event: { kind: 'key', name: 'tab', ctrl: false, meta: true },
       length: 2,
@@ -185,7 +189,9 @@ export function parseInputChunk(
   previousRest: string,
   chunk: Buffer | string,
 ): ParseResult {
-  const input = previousRest + String(chunk)
+  const chunkText = String(chunk)
+  const input = previousRest + chunkText
+  const treatNewlinesAsText = isMultilinePasteChunk(chunkText)
   const events: ParsedInputEvent[] = []
   let index = 0
 
@@ -214,7 +220,11 @@ export function parseInputChunk(
     if (!char) break
 
     if (char === '\r' || char === '\n') {
-      events.push({ kind: 'key', name: 'return', ctrl: false, meta: false })
+      if (treatNewlinesAsText) {
+        events.push({ kind: 'text', text: '\n', ctrl: false, meta: false })
+      } else {
+        events.push({ kind: 'key', name: 'return', ctrl: false, meta: false })
+      }
       if (
         (char === '\r' && remaining[1] === '\n') ||
         (char === '\n' && remaining[1] === '\r')
@@ -232,13 +242,13 @@ export function parseInputChunk(
       continue
     }
 
-    if (char === '\u007f' || char === '\b') {
+    if (char === '' || char === '\b') {
       events.push({ kind: 'key', name: 'backspace', ctrl: false, meta: false })
       index += 1
       continue
     }
 
-    if (char >= '\u0001' && char <= '\u001a') {
+    if (char >= '' && char <= '') {
       const name = CTRL_CHAR_TO_NAME[char]
       if (name) {
         events.push({ kind: 'text', text: name, ctrl: true, meta: false })
