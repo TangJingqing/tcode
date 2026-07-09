@@ -1,5 +1,5 @@
 import type { ToolRegistry } from './tool.js'
-import type { ChatMessage, ModelAdapter, StepDiagnostics, ToolCall } from './types.js'
+import type { ChatMessage, ModelAdapter, ProviderUsage, StepDiagnostics, ToolCall } from './types.js'
 import type { RuntimeConfig } from './config.js'
 import { resolveMaxOutputTokens } from './utils/context.js'
 
@@ -16,6 +16,13 @@ type AnthropicContentBlock =
 type AnthropicMessage = {
   role: 'user' | 'assistant'
   content: AnthropicContentBlock[]
+}
+
+type AnthropicUsage = {
+  input_tokens?: number
+  output_tokens?: number
+  cache_creation_input_tokens?: number
+  cache_read_input_tokens?: number
 }
 
 function sleep(ms: number): Promise<void> {
@@ -172,6 +179,23 @@ function toTextBlock(text: string): AnthropicContentBlock {
   return { type: 'text', text }
 }
 
+function normalizeAnthropicUsage(usage: AnthropicUsage | undefined): ProviderUsage | undefined {
+  if (!usage) return undefined
+  const inputTokens =
+    (usage.input_tokens ?? 0) +
+    (usage.cache_creation_input_tokens ?? 0) +
+    (usage.cache_read_input_tokens ?? 0)
+  const outputTokens = usage.output_tokens ?? 0
+  const totalTokens = inputTokens + outputTokens
+  if (totalTokens <= 0) return undefined
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    source: 'anthropic',
+  }
+}
+
 // 进度消息回传给模型时重新包裹 <progress>，让模型保持上下文。
 function toAssistantText(message: Extract<ChatMessage, {
   role: 'assistant' | 'assistant_progress'
@@ -313,6 +337,7 @@ export class AnthropicModelAdapter implements ModelAdapter {
       error?: { message?: string }
       stop_reason?: string
       content?: AnthropicContentBlock[]
+      usage?: AnthropicUsage
     } | null = null
 
     try {
@@ -328,6 +353,7 @@ export class AnthropicModelAdapter implements ModelAdapter {
           error?: { message?: string }
           stop_reason?: string
           content?: AnthropicContentBlock[]
+          usage?: AnthropicUsage
         }
 
         if (response.ok) {
@@ -404,6 +430,7 @@ export class AnthropicModelAdapter implements ModelAdapter {
       blockTypes,
       ignoredBlockTypes: [...ignoredBlockTypes],
     }
+    const usage = normalizeAnthropicUsage(data.usage)
 
     if (toolCalls.length > 0) {
       const result = {
@@ -415,6 +442,7 @@ export class AnthropicModelAdapter implements ModelAdapter {
             ? ('progress' as const)
             : undefined,
         diagnostics,
+        usage,
       }
       await context?.tracer?.record('model_output', result, context.stepIndex)
       return result
@@ -425,6 +453,7 @@ export class AnthropicModelAdapter implements ModelAdapter {
       content: parsedText.content,
       kind: parsedText.kind,
       diagnostics,
+      usage,
     }
     await context?.tracer?.record('model_output', result, context.stepIndex)
     return result

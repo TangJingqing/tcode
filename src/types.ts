@@ -1,16 +1,29 @@
 import type { AgentTracer } from './tracing.js'
 
+export type ProviderUsage = {
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  source: string
+}
+
+export type ProviderUsageMetadata = {
+  providerUsage?: ProviderUsage
+  usageStale?: boolean
+  usageStaleReason?: string
+}
+
 export type ChatMessage =
   | { role: 'system'; content: string }
   | { role: 'user'; content: string }
-  | { role: 'assistant'; content: string }
-  | { role: 'assistant_progress'; content: string }
-  | {
+  | ({ role: 'assistant'; content: string } & ProviderUsageMetadata)
+  | ({ role: 'assistant_progress'; content: string } & ProviderUsageMetadata)
+  | ({
       role: 'assistant_tool_call'
       toolUseId: string
       toolName: string
       input: unknown
-    }
+    } & ProviderUsageMetadata)
   | {
       role: 'tool_result'
       toolUseId: string
@@ -43,6 +56,7 @@ export type AgentStep =
       content: string
       kind?: 'final' | 'progress'
       diagnostics?: StepDiagnostics
+      usage?: ProviderUsage
     }
   | {
       type: 'tool_calls'
@@ -50,6 +64,7 @@ export type AgentStep =
       content?: string
       contentKind?: 'progress'
       diagnostics?: StepDiagnostics
+      usage?: ProviderUsage
     }
 
 export interface ModelAdapter {

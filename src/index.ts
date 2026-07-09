@@ -19,6 +19,7 @@ import type { ChatMessage } from './types.js'
 import { renderBanner } from './ui.js'
 import { runTtyApp } from './tty-app.js'
 import { runAgentTurn } from './agent-loop.js'
+import { createContentReplacementState } from './utils/tool-result-storage.js'
 import { createAgentTracer, resolveTraceConfig } from './tracing.js'
 
 async function main(): Promise<void> {
@@ -104,6 +105,7 @@ async function main(): Promise<void> {
       }),
     },
   ]
+  const contentReplacementState = createContentReplacementState()
 
   async function refreshSystemPrompt(): Promise<void> {
     messages[0] = {
@@ -141,6 +143,7 @@ async function main(): Promise<void> {
         sessionId,
         alreadySavedCount: 0,
         resumeTarget: resolvedResumeTarget,
+        contentReplacementState,
       })
       return
     }
@@ -217,6 +220,7 @@ async function main(): Promise<void> {
           permissions,
           maxSteps: 8,
           tracer,
+          contentReplacementState,
         })
       } catch (error) {
         const message =

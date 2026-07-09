@@ -1,6 +1,10 @@
 import type { ChatMessage, CompressionResult } from '../types.js'
 import type { ModelAdapter } from '../types.js'
-import { estimateMessagesTokens } from '../utils/token-estimator.js'
+import {
+  estimateMessagesTokens,
+  markProviderUsageStale,
+  tokenCountWithEstimation,
+} from '../utils/token-estimator.js'
 import { RETENTION } from './constants.js'
 import { buildCompactSummaryPrompt, parseSummaryFromResponse } from './prompt.js'
 
@@ -129,7 +133,7 @@ export async function compactConversation(
     return null
   }
 
-  const tokensBefore = estimateMessagesTokens(messages)
+  const tokensBefore = tokenCountWithEstimation(messages).totalTokens
 
   const systemMessages = messages.filter(m => m.role === 'system')
   const nonSystemMessages = messages.filter(m => m.role !== 'system')
@@ -140,15 +144,14 @@ export async function compactConversation(
 
   const boundary = findRetentionBoundary(messages)
   const messagesToCompress = messages.slice(1, boundary)
-  const messagesToKeep = messages.slice(boundary)
+  const messagesToKeep = messages
+    .slice(boundary)
+    .map(message => markProviderUsageStale(
+      message,
+      'conversation was compacted after this provider usage was recorded',
+    ))
 
   if (messagesToCompress.length === 0) {
-    return null
-  }
-
-  // 待压缩内容太少不值得让 LLM 跑一趟
-  const compressibleTokens = estimateMessagesTokens(messagesToCompress)
-  if (compressibleTokens < RETENTION.MIN_KEEP_TOKENS) {
     return null
   }
 
@@ -184,12 +187,7 @@ export async function compactConversation(
       ...messagesToKeep,
     ]
 
-    const tokensAfter = estimateMessagesTokens(newMessages)
-
-    // 压缩后反而更大 → 回滚，说明原始内容本身很短或摘要失控
-    if (tokensAfter >= tokensBefore) {
-      return null
-    }
+    const tokensAfter = tokenCountWithEstimation(newMessages).totalTokens
 
     return {
       messages: newMessages,

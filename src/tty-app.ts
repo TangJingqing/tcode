@@ -56,6 +56,10 @@ import type { AgentTracer } from './tracing.js'
 import type { ContextStats } from './utils/token-estimator.js'
 import { computeContextStats } from './utils/token-estimator.js'
 import { manualCompact } from './compact/manual-compact.js'
+import {
+  createContentReplacementState,
+  type ContentReplacementState,
+} from './utils/tool-result-storage.js'
 
 type TtyAppArgs = {
   runtime: RuntimeConfig | null
@@ -68,6 +72,7 @@ type TtyAppArgs = {
   sessionId: string
   alreadySavedCount: number
   resumeTarget?: string | 'picker'
+  contentReplacementState?: ContentReplacementState
 }
 
 type PendingApproval = {
@@ -987,6 +992,7 @@ async function handleInput(
       maxSteps: 8,
       tracer: args.tracer,
       modelName: model,
+      contentReplacementState: args.contentReplacementState,
       onAutoCompact(result: CompressionResult) {
         state.compressionStatus = `Auto-compressed: -${result.removedCount} msgs`
         state.contextStats = computeContextStats(args.messages, model)
@@ -1165,6 +1171,11 @@ async function handleInput(
     })
     state.transcriptScrollOffset = 0
   } finally {
+    // turn 结束后重新计算 stats：此时消息列表中已有带 providerUsage 的
+    // assistant/tool_call 消息，用精确计数替换 turn 开始时的 estimate_only
+    if (model) {
+      state.contextStats = computeContextStats(args.messages, model)
+    }
     args.permissions.endTurn()
     state.isBusy = false
   }
@@ -1226,6 +1237,8 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
 
   const permissionArgs: TtyAppArgs = {
     ...args,
+    contentReplacementState:
+      args.contentReplacementState ?? createContentReplacementState(),
     permissions: new PermissionManager(
       args.cwd,
       createPermissionPromptHandler(state, () => renderScreen(permissionArgs, state)),

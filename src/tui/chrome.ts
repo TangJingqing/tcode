@@ -149,8 +149,13 @@ function joinSegmentsWithinWidth(
 export function renderContextBadge(stats: {
   utilization: number
   warningLevel: 'normal' | 'warning' | 'critical' | 'blocked'
+  accounting?: {
+    providerUsageTokens: number
+    estimatedTokens: number
+    source: 'provider_usage' | 'provider_usage_plus_estimate' | 'estimate_only'
+  }
 }): string {
-  const { utilization, warningLevel } = stats
+  const { utilization, warningLevel, accounting } = stats
   const percent = Math.round(utilization * 100)
 
   const colorMap = {
@@ -163,8 +168,17 @@ export function renderContextBadge(stats: {
 
   const filled = Math.round(utilization * 10)
   const bar = '▓'.repeat(filled) + '░'.repeat(10 - filled)
+  const sourceLabel =
+    accounting?.source === 'provider_usage'
+      ? 'usage'
+      : accounting?.source === 'provider_usage_plus_estimate'
+        ? 'usage+est'
+        : accounting?.source === 'estimate_only'
+          ? 'est'
+          : ''
+  const suffix = sourceLabel ? ` ${sourceLabel}` : ''
 
-  return colorBadge('ctx', `${percent}% ${bar}`, color)
+  return colorBadge('ctx', `${percent}% ${bar}${suffix}`, color)
 }
 
 function borderLine(kind: 'top' | 'bottom', width: number): string {
@@ -265,6 +279,11 @@ export function renderBanner(
     contextStats?: {
       utilization: number
       warningLevel: 'normal' | 'warning' | 'critical' | 'blocked'
+      accounting?: {
+        providerUsageTokens: number
+        estimatedTokens: number
+        source: 'provider_usage' | 'provider_usage_plus_estimate' | 'estimate_only'
+      }
     } | null
   } = {
     transcriptCount: 0,

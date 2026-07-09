@@ -13,6 +13,49 @@
                          轻量清理            LLM 摘要
 ```
 
+### 前置：Tool Result Storage（大输出落盘，所有 step 执行）
+
+在讨论三级压缩之前，有一个贯穿全流程的机制——Tool Result Storage。它不按利用率触发，而是针对**单个工具输出过大**或**单轮工具累计输出过大**的情况，将完整输出持久化到磁盘，上下文只保留摘要。
+
+关键代码（`src/utils/tool-result-storage.ts`）：
+
+```typescript
+// 单个结果替换：content > 50K 字符 → 写盘，上下文只保留 2K 预览
+export async function replaceLargeToolResult(result, state?) {
+  if (content.length <= 50_000) return result              // 不够大，原样返回
+  await persistToolResult(content, toolUseId)              // 写入 ~/.tcode/tool-results/<id>.txt
+  return { ...result, content: buildPersistedMessage() }  // 替换为 <persisted-output> 预览
+}
+
+// 批量结果预算控制：单轮所有 tool_result 总大小 > 200K 字符
+// → 按从大到小排序，优先把最大的结果持久化，直到总量回到预算内
+export async function applyToolResultBudget(results, state, limit = 200_000) {
+  // 计算 visibleSize，如果超预算就按 size 降序依次持久化
+  // 已持久化过的结果不会重复写盘（通过 ContentReplacementState 追踪）
+}
+```
+
+`ContentReplacementState` 在整个会话生命周期中保持，确保：
+- 同一 toolUseId 的替换结果被缓存，不会重复写盘
+- 空输出被标记为 `(toolName completed with no output)`
+- 已持久化内容不会被二次处理
+
+调用位置在 `agent-loop.ts` 的 tool call 处理中：
+
+```typescript
+// 第一步：对每个工具结果应用 replaceLargeToolResult
+const toolResult = await replaceLargeToolResult({
+  role: 'tool_result',
+  toolUseId: call.id,
+  toolName: call.toolName,
+  content: result.output,
+  isError: !result.ok,
+}, contentReplacementState)
+
+// 第二步：对整个批次应用 applyToolResultBudget 预算控制
+const budgetedResults = await applyToolResultBudget(toolResults, contentReplacementState)
+```
+
 ### 第一级：microcompact（轻量清理，利用率 ≥ 50%）
 
 **策略**：把早期的 `tool_result` 内容替换为标记文本 `[Output cleared for context space]`，消息条数不变但体积大幅下降。只清理 `read_file`、`run_command`、`search_files`、`list_files`、`web_fetch` 这 5 种工具的输出，保留最近 3 条。
@@ -56,7 +99,24 @@ export function microcompact(messages: ChatMessage[], model: string): ChatMessag
 
 **策略**：把早期对话发给 LLM 生成一段结构化摘要，包含"用户请求/关键决策/修改文件/错误固定/当前状态/待办任务"六个部分。早期消息被替换成一条 `context_summary` 消息。
 
-关键代码（`src/agent-loop.ts`，每个 step 前）：
+触发判断（`src/compact/auto-compact.ts`）——`shouldAutoCompact` 从 `autoCompact` 中提取为独立函数，便于单测：
+
+```typescript
+export function shouldAutoCompact(messages: ChatMessage[], model: string): boolean {
+  const stats = computeContextStats(messages, model)
+  const shouldCompact = stats.utilization >= THRESHOLDS.AUTOCOMPACT_UTILIZATION
+  // 设置 TCODE_DEBUG_AUTOCOMPACT=1 可看到每次判断的详细日志
+  debugAutoCompact(
+    `source=${stats.accounting.source} total=${stats.accounting.totalTokens} ` +
+      `provider=${stats.accounting.providerUsageTokens} estimate=${stats.accounting.estimatedTokens} ` +
+      `utilization=${stats.utilization.toFixed(3)} threshold=${THRESHOLDS.AUTOCOMPACT_UTILIZATION} ` +
+      `should=${shouldCompact}`,
+  )
+  return shouldCompact
+}
+```
+
+调用时机（`src/agent-loop.ts`，每个 step 前）：
 
 ```typescript
 // step=0 必定检测，后续 step 在 critical/blocked 时也触发
@@ -82,22 +142,32 @@ export async function compactConversation(
   messages: ChatMessage[],
   modelAdapter: ModelAdapter,
 ): Promise<CompressionResult | null> {
+  // 使用 provider usage + 估算的混合计数（优先 API 返回的精确值）
+  const tokensBefore = tokenCountWithEstimation(messages).totalTokens
+
   // 找保留边界：从尾部向前累计，保留最近 ~40K tokens
   const boundary = findRetentionBoundary(messages)
   const messagesToCompress = messages.slice(1, boundary)   // 要被压缩的
-  const messagesToKeep = messages.slice(boundary)           // 保留的
-  
+  const messagesToKeep = messages
+    .slice(boundary)
+    // 保留的消息中的 provider usage 标记为 stale
+    // 因为压缩后消息列表结构变了，旧的 usage 数据不再准确
+    .map(message => markProviderUsageStale(
+      message,
+      'conversation was compacted after this provider usage was recorded',
+    ))
+
   // 把旧消息转成文本，让 LLM 生成摘要
   const conversationText = messagesToText(messagesToCompress)
   const response = await modelAdapter.next([{
     role: 'user',
     content: buildCompactSummaryPrompt(conversationText),
   }])
-  
+
   // 解析 <summary> 标签
   const summaryContent = parseSummaryFromResponse(response.content)
-  
-  // 组装新消息：系统消息 + 摘要 + 保留消息
+
+  // 组装新消息：系统消息 + 摘要 + 保留消息（含 stale 标记）
   return {
     messages: [
       ...systemMessages,
@@ -105,7 +175,8 @@ export async function compactConversation(
       ...messagesToKeep,
     ],
     removedCount: messagesToCompress.length,
-    tokensBefore, tokensAfter,
+    tokensBefore,
+    tokensAfter: tokenCountWithEstimation(newMessages).totalTokens,
   }
 }
 ```
@@ -134,20 +205,7 @@ for (let i = messages.length - 1; i >= 1; i--) {
 6. Pending Tasks — 待办任务
 ```
 
-失败保护：连续 3 次压缩失败自动禁用 autoCompact，防止反复消耗 token。
-
-压缩前的两道把关（`src/compact/compact.ts`）：
-
-```typescript
-// 把关 1：内容太少不值得启动 LLM
-const compressibleTokens = estimateMessagesTokens(messagesToCompress)
-if (compressibleTokens < RETENTION.MIN_KEEP_TOKENS) return null  // 不足 10K tokens 跳过
-
-// ... LLM 摘要生成 ...
-
-// 把关 2：压缩后反而更大 → 回滚
-if (tokensAfter >= tokensBefore) return null
-```
+失败保护：连续 3 次压缩失败自动禁用 autoCompact，防止反复消耗 token。`parseSummaryFromResponse` 解析不到 `<summary>` 标签也会返回 null，避免把模型自由发挥的内容当作摘要注入上下文。
 
 ### 第三级：/compact 命令（手动触发）
 
@@ -163,7 +221,11 @@ if (input === '/compact') {
 
 ## Token 估算
 
-按消息角色和文本语种混合估算（`src/utils/token-estimator.ts`）：
+`src/utils/token-estimator.ts` 提供两层 token 计数策略：
+
+### 第一层：基于 chars/token 的估算（`estimateMessagesTokens`）
+
+作为兜底方案，当没有 provider 精确数据时使用。
 
 **英文/拉丁文本** chars/token 基准：
 
@@ -205,6 +267,53 @@ export function estimateMessageTokens(message: ChatMessage): number {
 
 差距 60%。对话中文占比越高，之前低估越严重。
 
+### 第二层：Provider Usage 精确计数（`tokenCountWithEstimation`）
+
+当 API 响应中包含 `usage` 字段（Anthropic 返回 `input_tokens`/`output_tokens`），系统会**优先使用 API 的精确计数**，只对 usage boundary 之后的尾部消息用估算补齐。这比纯估算准确得多。
+
+```typescript
+export function tokenCountWithEstimation(messages: ChatMessage[]): TokenAccountingResult {
+  // 从尾部向前扫描，找最后一个带有效 providerUsage 的消息（且未标记 stale）
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const usage = messageProviderUsage(messages[i])
+    if (!usage) continue
+    // 找到精确边界：usage.totalTokens + 边界之后消息的估算值
+    const tailEstimate = estimateMessagesTokens(messages.slice(i + 1))
+    return {
+      totalTokens: usage.totalTokens + tailEstimate,
+      providerUsageTokens: usage.totalTokens,
+      estimatedTokens: tailEstimate,
+      source: tailEstimate > 0 ? 'provider_usage_plus_estimate' : 'provider_usage',
+    }
+  }
+  // 没有可用 provider usage → 全部走估算
+  return { totalTokens: estimateMessagesTokens(messages), source: 'estimate_only' }
+}
+```
+
+**Provider Usage 来自哪里？** `anthropic-adapter.ts` 在每次 API 响应中解析 `usage` 字段，转为 `ProviderUsage` 对象，附加到返回的 `AgentStep` 上。`agent-loop.ts` 中的 `withProviderUsage` 函数将其写入对应的 `assistant` / `assistant_progress` / `assistant_tool_call` 消息：
+
+```typescript
+function withProviderUsage<T extends ChatMessage>(message: T, usage?: ProviderUsage): T {
+  if (!usage) return message
+  if (message.role === 'assistant' || message.role === 'assistant_progress'
+      || message.role === 'assistant_tool_call') {
+    return { ...message, providerUsage: usage }
+  }
+  return message
+}
+```
+
+**Stale 标记机制**：当 `compactConversation` 压缩后，保留消息中的 provider usage 会被 `markProviderUsageStale` 标记为失效——因为消息列表结构已变，旧的 usage 数据不再反映当前 token 布局。`tokenCountWithEstimation` 会跳过 stale 消息，退回到估算模式。
+
+三种 `accounting.source` 值对应的 TUI 显示：
+
+| source | TUI badge 后缀 | 含义 |
+|--------|---------------|------|
+| `provider_usage` | `usage` | 最后一条消息就是 provider boundary，完全精确 |
+| `provider_usage_plus_estimate` | `usage+est` | provider 精确值 + 尾部估算 |
+| `estimate_only` | `est` | 无可用 provider 数据，全程估算 |
+
 ## 模型上下文窗口映射
 
 `src/utils/model-context.ts` 记录每个模型的上下文窗口和输出预留量：
@@ -222,25 +331,33 @@ deepseek-chat       contextWindow: 128K   outputReserve: 4K    → 有效输入:
 用户输入 → runAgentTurn()
   │
   └─ 每个 step:
-       ├─ microcompact()  utilization ≥ 50% → 清理旧 tool_result
-       ├─ computeContextStats()
-       ├─ autoCompact()   step=0 或 utilization ≥ 85% →
-       │     ├─ 待压缩内容 < 10K tokens? → 跳过
+       ├─ microcompact()        utilization ≥ 50% → 清理旧 tool_result
+       ├─ computeContextStats()  计算利用率（优先用 provider usage）
+       ├─ autoCompact()         step=0 或 utilization ≥ 85% →
        │     ├─ LLM 生成摘要
-       │     └─ tokensAfter ≥ tokensBefore? → 回滚
-       └─ model.next()  正常推理
+       │     ├─ 保留消息的 provider usage 标记为 stale
+       │     └─ 返回 context_summary + 保留尾部
+       ├─ model.next()          正常推理
+       │     └─ API 响应中的 usage 字段 → ProviderUsage 存入消息
+       └─ 工具执行后:
+             ├─ replaceLargeToolResult()  单个 > 50K chars → 持久化到磁盘
+             └─ applyToolResultBudget()   整批 > 200K chars → 大者优先落盘
 ```
 
 ## TUI 展示
 
-状态栏左上方显示上下文利用率 badge：
+状态栏左上方显示上下文利用率 badge，末尾标注 token 计数来源：
 
 ```
-ctx: 25% ▓▓░░░░░░░░  绿色 = normal
-ctx: 58% ▓▓▓▓▓▓░░░░  黄色 = warning  
-ctx: 88% ▓▓▓▓▓▓▓▓▓░  红色 = critical
-ctx: 97% ▓▓▓▓▓▓▓▓▓▓  亮红 = blocked
+ctx: 25% ▓▓░░░░░░░░ usage     绿色 = normal（精确计数）
+ctx: 58% ▓▓▓▓▓▓░░░░ usage+est  黄色 = warning（精确+估算）
+ctx: 88% ▓▓▓▓▓▓▓▓▓░ est        红色 = critical（纯估算）
+ctx: 97% ▓▓▓▓▓▓▓▓▓▓ est        亮红 = blocked
 ```
+
+- `usage`：最后一条消息正好是 provider usage boundary，完全精确
+- `usage+est`：有 provider 精确数据 + 尾部消息走估算
+- `est`：无可用 provider 数据，全程走 chars/token 估算
 
 footer 栏显示压缩状态：`| Saved 45% (85000 tokens)`
 
@@ -256,15 +373,16 @@ src/compact/
 └── manual-compact.ts /compact 入口
 
 src/utils/
-├── model-context.ts  模型上下文窗口映射
-└── token-estimator.ts Token 估算 + 利用率计算
+├── model-context.ts       模型上下文窗口映射
+├── token-estimator.ts     Token 估算 + Provider Usage 精确计数 + 利用率计算
+└── tool-result-storage.ts 大工具输出持久化 + 批量预算控制
 
-src/agent-loop.ts     集成微压缩 + 自动压缩
-src/anthropic-adapter.ts  context_summary 消息转 [Context Summary] user 消息
-src/types.ts          新增 context_summary 角色 + CompressionResult 类型
-src/tty-app.ts        /compact 命令 + 上下文状态管理
-src/tui/chrome.ts     ctx badge 渲染
-src/cli-commands.ts   /compact 命令注册
+src/agent-loop.ts         集成微压缩 + 自动压缩 + tool result storage + ProviderUsage 注入
+src/anthropic-adapter.ts  usage 字段解析 → ProviderUsage，context_summary → [Context Summary]
+src/types.ts              ProviderUsage + ProviderUsageMetadata + context_summary + CompressionResult
+src/tty-app.ts            /compact 命令 + ContentReplacementState 生命周期
+src/tui/chrome.ts         ctx badge 渲染（含 source 标签）
+src/cli-commands.ts       /compact 命令注册
 ```
 
 ---
@@ -297,13 +415,13 @@ src/cli-commands.ts   /compact 命令注册
 
 > 阈值确实没有经过大规模 A/B 测试，但有几层依据：第一，50% 是"安全冗余线"——大部分模型上下文窗口 128K-200K，在 50% 即 64K-100K 时做轻量清理，对用户体验完全无感但能为后续对话留出一半空间。第二，85% 触发 LLM 摘要是因为此时剩余有效空间约 20K-30K tokens，刚好是一次完整 tool-call 往返的典型消耗（读文件+搜索+run command 输出），再等就来不及了。第三，如果我要验证这些阈值，会做离线回放测试——收集 100 次真实长对话的 message 序列，在 50%/60%/70%/80% 几个候选点分别模拟 microcompact，对比压缩后消息列表能否被模型正确理解（用一个小模型做 next-token continuation 评估），选混淆度最低的阈值。这是一个可以工程化验证的问题。
 
-### Q4：如果 LLM 生成的摘要质量很差，甚至比原始消息还长怎么办？
+### Q4：如果 LLM 生成的摘要质量很差怎么办？
 
 **考点**：对边界情况的认知和兜底设计
 
 **满分答法**：
 
-> 有三层防护：第一，压缩前先算待压缩内容的 token 量，不足 10K tokens 直接跳过——内容太少的对话不值得启动一次 LLM 调用。第二，压缩后比对 `tokensAfter >= tokensBefore`，如果摘要没省空间甚至更大了，说明要么模型输出失控要么原始内容本身就是短文本，直接返回 null 回滚。第三，连续 3 次 autoCompact 失败自动禁用，防止反复浪费 token。`parseSummaryFromResponse` 解析不到 `<summary>` 标签也会返回 null。这四道防线确保不会越压越糟。
+> 有多层防护：第一，`compactConversation` 入口处就有三道基础检查——消息总数 ≤ 2 跳过、非系统消息不足 `MIN_KEEP_MESSAGES` 跳过、找不到可压缩消息跳过。第二，LLM 返回空响应或非 assistant 类型直接返回 null。第三，`parseSummaryFromResponse` 解析不到 `<summary>` 标签也返回 null——避免把模型自由发挥的内容当作摘要注入上下文。第四，也是最重要的兜底：连续 3 次 autoCompact 失败自动禁用整个 autoCompact 机制，防止反复浪费 token。这形成了一条"尝试→失败→退避"的防御链，确保不会越压越糟。此外，Tool Result Storage 在工具输出层面就已经把超大内容（>50K 字符）剥离到磁盘，减少了压缩时需要处理的文本量，间接降低了摘要失控的风险。
 
 ### Q5：你为什么不用 API 自带的 prompt caching？自己做压缩是不是重复造轮子？
 
@@ -327,7 +445,7 @@ src/cli-commands.ts   /compact 命令注册
 
 **满分答法**：
 
-> 现在已经不局限在 step 0 了。当前设计是：step 0 必定检测一次利用率；后续每个 step 也会计算 `computeContextStats`——O(n) 纯计算、开销极小——只要发现 warningLevel 进入 critical 或 blocked 就触发压缩。这样能兜住 mid-turn 突发情况：比如某次 `read_file` 拉了一个 50K 的日志文件，step 2 利用率从 60% 跳到 90%，step 3 开始前就会触发 autoCompact。为什么不是每个 step 无条件检查？因为 `autoCompact` 内部有两个前置判断——待压缩内容不足 10K tokens 跳过、非 critical/blocked 跳过，所以多算一次 stats 只是 CPU 开销，不会产生 LLM 调用。microcompact 仍然每个 step 必跑，作为第一道防线。两者配合后：microcompact 抑制缓慢增长，autoCompact 应对突发跃升。
+> 现在已经不局限在 step 0 了。当前设计是：step 0 必定检测一次利用率；后续每个 step 也会计算 `computeContextStats`——O(n) 纯计算、开销极小——只要发现 warningLevel 进入 critical 或 blocked 就触发压缩。这样能兜住 mid-turn 突发情况：比如某次 `read_file` 拉了一个 50K 的日志文件，step 2 利用率从 60% 跳到 90%，step 3 开始前就会触发 autoCompact。为什么不是每个 step 无条件检查？因为 `shouldAutoCompact` 只是做一次 O(n) 的利用率计算，开销极小——真正的 LLM 调用只在利用率超过 85% 阈值时才会触发。microcompact 仍然每个 step 必跑，作为第一道防线。两者配合后：microcompact 抑制缓慢增长，autoCompact 应对突发跃升。另外 Tool Result Storage 在工具输出阶段就把 >50K 的单次输出写入磁盘，这也从源头减少了 mid-turn 上下文暴涨的概率。
 
 ### Q8：context_summary 消息在后续对话中会怎么被处理？如果摘要本身也要被再次压缩呢？
 
@@ -345,11 +463,26 @@ src/cli-commands.ts   /compact 命令注册
 
 > autoCompact 发生在 turn 开始时，用户刚提交完输入在等待第一个响应，此时多等 2-5 秒做压缩比 mid-turn 突然卡顿可接受得多——因为用户预期中"开始思考"本身就需要时间。TUI 层面，状态栏会从"Thinking..."变成"Compressing context..."，footer 压缩完成后显示 `Saved 45% (85000 tokens)`。microcompact 完全无感——纯 CPU 计算，O(n) 遍历消息列表，几百条消息也就不到 1ms。手动 /compact 会阻塞输入直到完成，但那是用户主动触发的，延迟是可预期的——就像 git gc，你知道它要跑一会儿。
 
-### Q10：如果你来重新设计这个系统，你会改什么？
+### Q10：工具输出太大你是怎么处理的？为什么要存到磁盘？
+
+**考点**：对上下文管理的全面思考——不只是压缩对话，还要从源头控制输入
+
+**满分答法**：
+
+> Tool Result Storage 是三阶段压缩体系的前置过滤器，解决的是"单个工具输出太大"这个特殊场景。比如 `run_command` 跑了一个 100K 的日志输出，直接塞进上下文会把利用率瞬间推上去，甚至直接触发 blocked。我分两层处理：第一层 `replaceLargeToolResult`——单个结果超过 50K 字符就把它持久化到 `~/.tcode/tool-results/<session-id>/<toolUseId>.txt`，上下文里只保留 `<persisted-output>` 标记 + 前 2K 字符预览 + 文件路径。第二层 `applyToolResultBudget`——整轮所有工具输出的累计大小超过 200K 字符时，按从大到小排序，优先持久化最大的那些结果，直到总量回到预算内。`ContentReplacementState` 在整个会话生命周期中跟踪哪些结果已被替换，保证不会重复写盘。为什么选 50K 这个值？它是一个实验性阈值——足够容纳绝大部分正常的文件读取和命令输出，同时确保单条消息不占用超过窗口的 ~40%（对于 128K 窗口的模型）。用户需要完整输出时可以去磁盘文件查看，这是一种"延迟加载"策略——和操作系统虚拟内存把冷页面换出到磁盘的思路一致。
+
+### Q11：API 已经返回了精确的 token 用量，你为什么还保留 chars/token 估算？
+
+**考点**：对混合策略的理解和工程实用性判断
+
+**满分答法**：
+
+> 两者互补而非互斥。`tokenCountWithEstimation` 的策略是：从消息列表尾部向前扫描，找到最后一条带有效 provider usage 的消息，将其 `totalTokens` 作为精确基准，usage boundary 之后的尾部消息用 chars/token 估算补齐。Provider usage 覆盖了大部分上下文（因为它是最近一次 API 调用的真实数据），估算只负责边界之后新加入的几条消息——通常就是最新一轮的用户输入和工具结果，这几条的估算误差在总 token 数中占比很小。但如果 provider usage 被 `markProviderUsageStale` 标记了——比如压缩后消息列表结构已变——那就全部退回估算模式。关键设计是 `usageStale` 标记：压缩后的保留消息虽然有旧的 provider usage 数据，但它不再反映当前消息列表的真实 token 分布（消息被删了、被摘要替代了），必须让它失效，否则会严重低估利用率。这和数据库的"stale read"问题是同构的——宁可退回到精度较低的估算，也不能让一个已经失真的精确值误导决策。TUI badge 末尾的 `usage`/`usage+est`/`est` 标签让用户能直接看到当前处于哪种模式，增加了系统的可观测性。
+
+### Q12：如果你来重新设计这个系统，你会改什么？
 
 **考点**：反思能力 + 成长性
 
 **满分答法**：
 
 > 三个改进方向：**第一**，chars/token 估算换成一个轻量的本地 tokenizer，比如用 WASM 编译的 cl100k_base，在首次使用时懒加载，精度提升后阈值可以调得更激进（比如 microcompact 从 50% 提到 60%）。**第二**，autoCompact 不应该硬编码只在 step 0 运行，应该做一个 mid-turn 的快速检测——如果当前 step 后发现利用率跃升超过 15%，说明这步产生了大量输出，下一个 step 前应该触发压缩。**第三**，也是最重要的——应该引入一个压缩质量评估机制，至少让压缩后的消息列表跑一次空模型调用（dummy call 或不实际执行的 evaluation），验证模型还能正确理解任务上下文，如果理解偏差过大就回滚。当前全靠"压缩比原始好"这个假设，缺少客观的质量信号。
-```
