@@ -35,6 +35,7 @@ export type ContextStats = {
 const CHARS_PER_TOKEN_BASE: Record<string, number> = {
   system: 3.5,
   user: 3.0,
+  assistant_thinking: 3.0,
   assistant: 3.5,
   assistant_progress: 3.5,
   assistant_tool_call: 2.5,
@@ -80,6 +81,12 @@ function getMessageText(message: ChatMessage): string {
     case 'tool_result':
     case 'context_summary':
       return message.content
+    case 'assistant_thinking':
+      try {
+        return JSON.stringify(message.blocks)
+      } catch {
+        return ''
+      }
     case 'assistant_tool_call':
       try {
         return JSON.stringify(message.input)

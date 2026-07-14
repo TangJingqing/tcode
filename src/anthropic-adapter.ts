@@ -1,5 +1,12 @@
 import type { ToolRegistry } from './tool.js'
-import type { ChatMessage, ModelAdapter, ProviderUsage, StepDiagnostics, ToolCall } from './types.js'
+import type {
+  ChatMessage,
+  ModelAdapter,
+  ProviderThinkingBlock,
+  ProviderUsage,
+  StepDiagnostics,
+  ToolCall,
+} from './types.js'
 import type { RuntimeConfig } from './config.js'
 import { resolveMaxOutputTokens } from './utils/context.js'
 
@@ -138,6 +145,10 @@ function isToolUseBlock(block: AnthropicContentBlock): block is Extract<Anthropi
   )
 }
 
+function isThinkingBlock(block: AnthropicContentBlock): block is ProviderThinkingBlock {
+  return block.type === 'thinking' || block.type === 'redacted_thinking'
+}
+
 // 解析助手文本头部的 <progress>/<final> 标记，区分“仍在进行”与“已完成”。
 function parseAssistantText(content: string): {
   content: string
@@ -221,6 +232,58 @@ function pushAnthropicMessage(
   messages.push({ role, content: [block] })
 }
 
+function isAssistantTextMessage(
+  message: ChatMessage,
+): message is Extract<ChatMessage, { role: 'assistant' | 'assistant_progress' }> {
+  return message.role === 'assistant' || message.role === 'assistant_progress'
+}
+
+function normalizeLegacyThinkingToolRounds(messages: ChatMessage[]): ChatMessage[] {
+  const normalized: ChatMessage[] = []
+
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i]
+    if (message.role !== 'assistant_thinking') {
+      normalized.push(message)
+      continue
+    }
+
+    let cursor = i + 1
+    const textMessages: ChatMessage[] = []
+    while (cursor < messages.length && isAssistantTextMessage(messages[cursor])) {
+      textMessages.push(messages[cursor])
+      cursor += 1
+    }
+
+    const toolCalls: ChatMessage[] = []
+    const toolResults: ChatMessage[] = []
+    while (cursor + 1 < messages.length) {
+      const toolCall = messages[cursor]
+      const toolResult = messages[cursor + 1]
+      if (
+        toolCall.role !== 'assistant_tool_call' ||
+        toolResult.role !== 'tool_result' ||
+        toolCall.toolUseId !== toolResult.toolUseId
+      ) {
+        break
+      }
+      toolCalls.push(toolCall)
+      toolResults.push(toolResult)
+      cursor += 2
+    }
+
+    if (toolCalls.length > 1) {
+      normalized.push(message, ...textMessages, ...toolCalls, ...toolResults)
+      i = cursor - 1
+      continue
+    }
+
+    normalized.push(message)
+  }
+
+  return normalized
+}
+
 function toAnthropicMessages(messages: ChatMessage[]): {
   system: string
   messages: AnthropicMessage[]
@@ -231,12 +294,20 @@ function toAnthropicMessages(messages: ChatMessage[]): {
     .join('\n\n')
 
   const converted: AnthropicMessage[] = []
+  const normalizedMessages = normalizeLegacyThinkingToolRounds(messages)
 
-  for (const message of messages) {
+  for (const message of normalizedMessages) {
     if (message.role === 'system') continue
 
     if (message.role === 'user') {
       pushAnthropicMessage(converted, 'user', toTextBlock(message.content))
+      continue
+    }
+
+    if (message.role === 'assistant_thinking') {
+      for (const block of message.blocks) {
+        pushAnthropicMessage(converted, 'assistant', block)
+      }
       continue
     }
 
@@ -401,6 +472,7 @@ export class AnthropicModelAdapter implements ModelAdapter {
 
     const toolCalls: ToolCall[] = []
     const textParts: string[] = []
+    const thinkingBlocks: ProviderThinkingBlock[] = []
     const blockTypes: string[] = []
     const ignoredBlockTypes = new Set<string>()
 
@@ -418,6 +490,11 @@ export class AnthropicModelAdapter implements ModelAdapter {
           toolName: block.name,
           input: block.input,
         })
+        continue
+      }
+
+      if (isThinkingBlock(block)) {
+        thinkingBlocks.push(block)
         continue
       }
 
@@ -441,6 +518,7 @@ export class AnthropicModelAdapter implements ModelAdapter {
           parsedText.kind === 'progress'
             ? ('progress' as const)
             : undefined,
+        thinkingBlocks,
         diagnostics,
         usage,
       }
@@ -452,6 +530,7 @@ export class AnthropicModelAdapter implements ModelAdapter {
       type: 'assistant' as const,
       content: parsedText.content,
       kind: parsedText.kind,
+      thinkingBlocks,
       diagnostics,
       usage,
     }

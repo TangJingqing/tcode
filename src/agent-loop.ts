@@ -1,5 +1,5 @@
 import type { ToolRegistry } from './tool.js'
-import type { ChatMessage, CompressionResult, ModelAdapter, ProviderUsage } from './types.js'
+import type { ChatMessage, CompressionResult, ModelAdapter, ProviderThinkingBlock, ProviderUsage } from './types.js'
 import type { PermissionManager } from './permissions.js'
 import type { AgentTracer } from './tracing.js'
 import { summarizeAgentStep, summarizeMessages } from './tracing.js'
@@ -127,6 +127,7 @@ function formatDiagnostics(args: {
 function isRecoverableThinkingStop(args: {
   isEmpty: boolean
   stopReason?: string
+  blockTypes?: string[]
   ignoredBlockTypes?: string[]
 }): boolean {
   if (!args.isEmpty) {
@@ -137,7 +138,10 @@ function isRecoverableThinkingStop(args: {
     return false
   }
 
-  return (args.ignoredBlockTypes ?? []).includes('thinking')
+  return (
+    (args.blockTypes ?? []).includes('thinking') ||
+    (args.ignoredBlockTypes ?? []).includes('thinking')
+  )
 }
 
 export async function runAgentTurn(args: {
@@ -173,6 +177,17 @@ export async function runAgentTurn(args: {
       {
         role: 'user',
         content,
+      },
+    ]
+  }
+
+  const appendThinkingBlocks = (blocks: ProviderThinkingBlock[] | undefined) => {
+    if (!blocks || blocks.length === 0) return
+    messages = [
+      ...messages,
+      {
+        role: 'assistant_thinking',
+        blocks,
       },
     ]
   }
@@ -276,6 +291,7 @@ export async function runAgentTurn(args: {
           isRecoverableThinkingStop({
             isEmpty,
             stopReason: next.diagnostics?.stopReason,
+            blockTypes: next.diagnostics?.blockTypes,
             ignoredBlockTypes: next.diagnostics?.ignoredBlockTypes,
           }) &&
           recoverableThinkingRetryCount < 3
@@ -385,6 +401,8 @@ export async function runAgentTurn(args: {
 
         return finishTurn(withAssistant, { outcome: 'assistant_final' })
       }
+
+      appendThinkingBlocks(next.thinkingBlocks)
 
       if (next.content && looksLikeClarifyingQuestion(next.content)) {
         await args.tracer?.record(
@@ -506,9 +524,7 @@ export async function runAgentTurn(args: {
         budgetedResults.results.map(result => [result.toolUseId, result]),
       )
 
-      for (let i = 0; i < executedToolResults.length; i++) {
-        const entry = executedToolResults[i]
-        const toolResult = toolResultById.get(entry.call.id) ?? entry.toolResult
+      const toolCallMessages = executedToolResults.map((entry, i) => {
         const toolCallMessage: ChatMessage = {
           role: 'assistant_tool_call',
           toolUseId: entry.call.id,
@@ -516,24 +532,31 @@ export async function runAgentTurn(args: {
           input: entry.call.input,
         }
 
-        messages = [
-          ...messages,
-          withProviderUsage(
-            toolCallMessage,
-            i === executedToolResults.length - 1 ? next.usage : undefined,
-          ),
-          toolResult,
-        ]
+        return withProviderUsage(
+          toolCallMessage,
+          i === executedToolResults.length - 1 ? next.usage : undefined,
+        )
+      })
+      const toolResults = executedToolResults.map(entry =>
+        toolResultById.get(entry.call.id) ?? entry.toolResult,
+      )
 
-        if (entry.result.awaitUser) {
-          const question = entry.result.output.trim()
+      messages = [
+        ...messages,
+        ...toolCallMessages,
+        ...toolResults,
+      ]
+
+      const awaitUserEntry = executedToolResults.find(entry => entry.result.awaitUser)
+      if (awaitUserEntry) {
+        const question = awaitUserEntry.result.output.trim()
           if (question.length > 0) {
             await args.tracer?.record(
               'loop_decision',
               {
                 decision: 'await_user',
-                toolUseId: entry.call.id,
-                toolName: entry.call.toolName,
+                toolUseId: awaitUserEntry.call.id,
+                toolName: awaitUserEntry.call.toolName,
                 question,
               },
               step,
@@ -549,7 +572,6 @@ export async function runAgentTurn(args: {
           }
 
           return finishTurn(messages, { outcome: 'await_user' })
-        }
       }
     }
 

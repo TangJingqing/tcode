@@ -14,7 +14,7 @@ import type { ChatMessage } from './types.js'
 
 const MAX_TITLE_LENGTH = 60
 
-type EventType = 'system' | 'user' | 'assistant' | 'progress' | 'tool_call' | 'tool_result' | 'summary' | 'compact_boundary' | 'rename'
+type EventType = 'system' | 'user' | 'assistant' | 'thinking' | 'progress' | 'tool_call' | 'tool_result' | 'summary' | 'compact_boundary' | 'rename'
 
 type SessionEvent = {
   type: EventType
@@ -47,6 +47,7 @@ function roleToType(role: string): EventType {
     case 'system': return 'system'
     case 'user': return 'user'
     case 'assistant': return 'assistant'
+    case 'assistant_thinking': return 'thinking'
     case 'assistant_progress': return 'progress'
     case 'assistant_tool_call': return 'tool_call'
     case 'tool_result': return 'tool_result'
