@@ -1,239 +1,1153 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>tcode</title>
-    <style>
-      :root {
-        color-scheme: dark;
-        --bg: #0f172a;
-        --panel: #111827;
-        --panel-2: #1f2937;
-        --text: #e5e7eb;
-        --muted: #9ca3af;
-        --accent: #38bdf8;
-        --line: rgba(148, 163, 184, 0.24);
-      }
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title data-i18n="page_title">tcode | AI-powered terminal coding assistant</title>
+  <meta name="description" content="tcode is a lightweight terminal coding assistant for local development workflows. Model-tool-loop, secure approvals, resumable sessions, long-context controls, Skills, MCP, and agent tracing.">
 
-      * {
-        box-sizing: border-box;
-      }
+  <!-- Typography: Editorial Serif + Clean Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-      body {
-        margin: 0;
-        background:
-          radial-gradient(circle at top left, rgba(56, 189, 248, 0.16), transparent 32rem),
-          var(--bg);
-        color: var(--text);
-        font-family:
-          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }
+  <style>
+    :root {
+      --bg-base: #FBF9F6;
+      --bg-surface: #FFFFFF;
+      --bg-elevated: #F4F2EC;
 
-      main {
-        width: min(1120px, calc(100% - 40px));
-        margin: 0 auto;
-        padding: 72px 0;
-      }
+      --border-light: rgba(0, 0, 0, 0.06);
+      --border-medium: rgba(0, 0, 0, 0.12);
 
-      .hero {
-        display: grid;
-        grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
-        gap: 32px;
-        align-items: center;
-      }
+      --text-primary: #121212;
+      --text-secondary: #5C5C59;
+      --text-tertiary: #8A8A85;
 
-      h1 {
-        margin: 0 0 20px;
-        font-size: clamp(48px, 9vw, 92px);
-        line-height: 0.95;
-        letter-spacing: -0.07em;
-      }
+      --accent: #38bdf8;
+      --accent-hover: #0ea5e9;
 
-      h2 {
-        margin: 0 0 14px;
-        font-size: 22px;
-      }
+      --font-sans: "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --font-serif: "Newsreader", Georgia, "Times New Roman", serif;
+      --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-      p {
-        color: var(--muted);
-        font-size: 17px;
-        line-height: 1.7;
-      }
+      --radius-sm: 6px;
+      --radius-md: 12px;
+      --radius-lg: 20px;
+      --radius-full: 999px;
 
-      .lead {
-        max-width: 700px;
-        font-size: 20px;
-      }
+      --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+      --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.06);
+      --shadow-lg: 0 24px 48px rgba(0, 0, 0, 0.08);
+      --shadow-float: 0 32px 64px -12px rgba(0, 0, 0, 0.1);
+    }
 
-      .actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-        margin-top: 28px;
-      }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
 
-      .button {
-        display: inline-flex;
-        align-items: center;
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        padding: 12px 18px;
-        color: var(--text);
-        text-decoration: none;
-        background: rgba(255, 255, 255, 0.04);
-      }
+    html { scroll-behavior: smooth; }
 
-      .button.primary {
-        border-color: rgba(56, 189, 248, 0.5);
-        color: #082f49;
-        background: var(--accent);
-        font-weight: 700;
-      }
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--bg-base);
+      color: var(--text-primary);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      overflow-x: hidden;
+      letter-spacing: -0.01em;
+    }
 
-      .terminal,
-      .card {
-        border: 1px solid var(--line);
-        border-radius: 24px;
-        background: rgba(17, 24, 39, 0.82);
-        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
-      }
+    ::selection {
+      background: rgba(56, 189, 248, 0.2);
+      color: var(--text-primary);
+    }
 
-      .terminal {
-        overflow: hidden;
-      }
+    .ambient-mesh {
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      pointer-events: none; z-index: -1;
+      background:
+        radial-gradient(ellipse at top left, rgba(56, 189, 248, 0.03) 0%, transparent 50%),
+        radial-gradient(ellipse at bottom right, rgba(0, 0, 0, 0.02) 0%, transparent 50%);
+    }
 
-      .bar {
-        display: flex;
-        gap: 8px;
-        padding: 16px;
-        background: rgba(255, 255, 255, 0.04);
-        border-bottom: 1px solid var(--line);
-      }
+    .container {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 0 24px;
+      position: relative;
+    }
 
-      .dot {
-        width: 12px;
-        height: 12px;
-        border-radius: 999px;
-        background: #64748b;
-      }
+    .navbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 24px 0;
+      position: sticky;
+      top: 0;
+      background: rgba(251, 249, 246, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      z-index: 100;
+      border-bottom: 1px solid transparent;
+      transition: border-color 0.3s ease;
+    }
 
-      pre {
-        margin: 0;
-        padding: 24px;
-        color: #d1d5db;
-        white-space: pre-wrap;
-        font-size: 14px;
-        line-height: 1.65;
-      }
+    .navbar.scrolled { border-bottom-color: var(--border-light); }
 
-      code {
-        color: #bae6fd;
-      }
+    .brand {
+      font-weight: 600;
+      font-size: 1.1rem;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      letter-spacing: -0.02em;
+    }
 
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 18px;
-        margin-top: 52px;
-      }
+    .brand img {
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+    }
 
-      .card {
-        padding: 22px;
-      }
+    .nav-links {
+      display: flex;
+      gap: 28px;
+      align-items: center;
+      overflow-x: auto;
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
 
-      .tag {
-        display: inline-block;
-        margin-bottom: 12px;
-        color: var(--accent);
-        font-size: 13px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-      }
+    .nav-links::-webkit-scrollbar { display: none; }
 
-      footer {
-        margin-top: 54px;
-        color: var(--muted);
-      }
+    .nav-links a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: color 0.2s ease;
+    }
 
-      @media (max-width: 860px) {
-        .hero,
-        .grid {
-          grid-template-columns: 1fr;
+    .nav-links a:hover { color: var(--text-primary); }
+
+    .lang-toggle {
+      background: rgba(0,0,0,0.04);
+      border: none;
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      padding: 6px 10px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+
+    .lang-toggle:hover { background: rgba(0,0,0,0.08); }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border-radius: var(--radius-sm);
+      font-size: 0.9rem;
+      font-weight: 500;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+
+    .btn-primary {
+      background: var(--text-primary);
+      color: #fff;
+      border: 1px solid var(--text-primary);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .btn-primary:hover {
+      background: #333;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--text-primary);
+      border: 1px solid var(--border-medium);
+    }
+
+    .btn-secondary:hover {
+      background: var(--bg-surface);
+      border-color: var(--text-primary);
+    }
+
+    .hero {
+      padding: 100px 0 80px;
+      text-align: center;
+      max-width: 860px;
+      margin: 0 auto;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: var(--radius-full);
+      background: rgba(56, 189, 248, 0.08);
+      color: var(--accent-hover);
+      font-size: 0.85rem;
+      font-weight: 500;
+      margin-bottom: 32px;
+    }
+
+    .hero h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(3rem, 6vw, 4.5rem);
+      line-height: 1.05;
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      margin-bottom: 24px;
+      color: var(--text-primary);
+    }
+
+    .hero h1 em {
+      font-style: italic;
+      color: var(--accent-hover);
+    }
+
+    .hero p {
+      font-size: clamp(1.1rem, 2vw, 1.25rem);
+      color: var(--text-secondary);
+      margin: 0 auto 48px;
+      max-width: 680px;
+      line-height: 1.6;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .showcase {
+      margin: 0 auto 100px;
+      max-width: 960px;
+      position: relative;
+    }
+
+    .terminal-window {
+      background: #0f1115;
+      border-radius: var(--radius-md);
+      padding: 16px;
+      overflow: hidden;
+      box-shadow: var(--shadow-float);
+      text-align: left;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      line-height: 1.5;
+      color: #e2e8f0;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .t-panel {
+      border: 1px solid #165c6b;
+      border-radius: 4px;
+      padding: 12px 16px;
+      position: relative;
+    }
+
+    .t-panel-title {
+      position: absolute;
+      top: 12px;
+      right: 16px;
+      color: #5c7080;
+      font-size: 0.75rem;
+    }
+
+    .t-header-title { color: #e2e8f0; font-weight: 500; margin-bottom: 8px; }
+    .t-header-desc { color: #8b949e; margin-bottom: 12px; }
+    .t-stats-line { color: #8b949e; }
+    .t-stats-label { color: #38bdf8; margin-right: 4px; }
+    .t-stats-value { color: #e2e8f0; font-weight: 500; margin-right: 12px; }
+    .t-stats-value.green { color: #4ade80; }
+    .t-cwd { color: #5c7080; margin-top: 4px; font-size: 0.8rem; }
+
+    .t-feed-title { color: #38bdf8; margin-bottom: 12px; font-weight: 500; }
+    .t-role { color: #4ade80; font-weight: 500; margin-bottom: 4px; }
+    .t-message { color: #e2e8f0; margin-bottom: 12px; }
+    .t-list { list-style: none; margin-bottom: 16px; }
+    .t-list li { margin-bottom: 4px; display: flex; align-items: flex-start; gap: 8px; }
+    .t-list-icon { font-size: 0.9rem; }
+
+    .t-prompt-title { color: #38bdf8; margin-bottom: 12px; font-weight: 500; }
+    .t-prompt-hints { color: #8b949e; margin-bottom: 12px; }
+    .t-prompt-hints strong { color: #d08770; font-weight: normal; }
+    .t-input-line { display: flex; align-items: center; gap: 8px; }
+    .t-input-prompt { color: #4ade80; font-weight: 500; }
+    .t-input-cursor {
+      display: inline-block;
+      width: 8px;
+      height: 14px;
+      background: #e2e8f0;
+      animation: blink 1s step-end infinite;
+      vertical-align: middle;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+
+    .t-footer-bar {
+      display: flex;
+      justify-content: space-between;
+      color: #5c7080;
+      font-size: 0.75rem;
+      padding: 0 4px;
+    }
+    .t-footer-right span { color: #4ade80; }
+
+    .logo-strip {
+      padding: 40px 0;
+      border-top: 1px solid var(--border-light);
+      border-bottom: 1px solid var(--border-light);
+      text-align: center;
+      margin-bottom: 100px;
+    }
+    .logo-strip p {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-tertiary);
+      margin-bottom: 24px;
+    }
+    .logo-strip-flex {
+      display: flex;
+      justify-content: center;
+      gap: 48px;
+      flex-wrap: wrap;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+    }
+
+    section { padding: 80px 0; }
+
+    .section-header {
+      margin-bottom: 60px;
+      max-width: 600px;
+    }
+
+    .section-header h2 {
+      font-family: var(--font-serif);
+      font-size: clamp(2rem, 3.5vw, 2.5rem);
+      font-weight: 400;
+      margin-bottom: 16px;
+      color: var(--text-primary);
+    }
+
+    .section-header p {
+      font-size: 1.1rem;
+      color: var(--text-secondary);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 24px;
+    }
+
+    .feature-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-lg);
+      padding: 40px;
+      box-shadow: var(--shadow-sm);
+      transition: all 0.3s ease;
+    }
+
+    .feature-card:hover {
+      box-shadow: var(--shadow-md);
+      border-color: var(--border-medium);
+      transform: translateY(-2px);
+    }
+
+    .span-4 { grid-column: span 4; }
+    .span-6 { grid-column: span 6; }
+    .span-8 { grid-column: span 8; }
+    .span-12 { grid-column: span 12; }
+
+    @media (max-width: 900px) {
+      .span-4, .span-6, .span-8 { grid-column: span 12; }
+    }
+
+    .feature-icon {
+      width: 40px; height: 40px;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--bg-elevated);
+      border-radius: var(--radius-sm);
+      margin-bottom: 24px;
+      color: var(--text-primary);
+    }
+
+    .feature-card h3 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: var(--text-primary);
+    }
+
+    .feature-card p {
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    .feature-list {
+      list-style: none;
+      margin-top: 24px;
+    }
+
+    .feature-list li {
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border-light);
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+      display: flex;
+      align-items: center;
+    }
+
+    .feature-list li:last-child { border-bottom: none; }
+
+    .feature-list li::before {
+      content: "";
+      display: block;
+      width: 6px; height: 6px;
+      background: var(--text-tertiary);
+      border-radius: 50%;
+      margin-right: 12px;
+    }
+
+    .tools-flex {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .tool-tag {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      padding: 6px 12px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-full);
+      color: var(--text-secondary);
+      transition: all 0.2s ease;
+    }
+
+    .tool-tag:hover {
+      color: var(--text-primary);
+      border-color: var(--text-primary);
+      background: var(--bg-surface);
+    }
+
+    .arch-list {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .arch-item {
+      display: flex;
+      align-items: baseline;
+      gap: 24px;
+      padding: 24px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-md);
+      transition: background 0.2s ease;
+    }
+
+    .arch-item:hover { background: var(--bg-elevated); }
+
+    .arch-item code {
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+      color: var(--text-primary);
+      font-weight: 500;
+      min-width: 200px;
+    }
+
+    .arch-item p {
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+      margin: 0;
+    }
+
+    @media (max-width: 600px) {
+      .arch-item { flex-direction: column; gap: 8px; }
+    }
+
+    footer {
+      border-top: 1px solid var(--border-medium);
+      padding: 80px 0;
+      margin-top: 80px;
+    }
+
+    .footer-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr;
+      gap: 40px;
+    }
+
+    @media (max-width: 768px) {
+      .footer-grid { grid-template-columns: 1fr; gap: 32px; }
+    }
+
+    .footer-brand h4 {
+      font-weight: 600;
+      font-size: 1.1rem;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .footer-brand p {
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      max-width: 280px;
+    }
+
+    .footer-col h5 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 20px;
+      color: var(--text-primary);
+    }
+
+    .footer-col a {
+      display: block;
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 0.9rem;
+      margin-bottom: 12px;
+      transition: color 0.2s;
+    }
+
+    .footer-col a:hover { color: var(--accent-hover); }
+
+    .fade-up {
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1), transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+      will-change: opacity, transform;
+    }
+
+    .fade-up.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .delay-100 { transition-delay: 100ms; }
+    .delay-200 { transition-delay: 200ms; }
+    .delay-300 { transition-delay: 300ms; }
+  </style>
+</head>
+<body>
+
+  <div class="ambient-mesh"></div>
+
+  <nav class="navbar" id="navbar">
+    <div class="container" style="display: flex; justify-content: space-between; align-items: center; gap: 48px;">
+      <div class="brand" style="flex-shrink: 0;">
+        <img src="./logo.svg" alt="tcode Logo" />
+        tcode
+      </div>
+      <div class="nav-links">
+        <a href="#features" data-i18n="nav_features">Features</a>
+        <a href="#architecture" data-i18n="nav_arch">Architecture</a>
+        <button id="langToggle" class="lang-toggle">EN / 中</button>
+        <a href="../README.md" class="btn btn-secondary" style="padding: 6px 14px; font-size: 0.85rem;" data-i18n="nav_docs">Docs</a>
+      </div>
+    </div>
+  </nav>
+
+  <main>
+
+    <header class="hero container">
+      <div class="hero-badge fade-up" data-i18n="badge_beta">
+        Sessions, MCP, tracing, and long-context controls are available
+      </div>
+      <h1 class="fade-up delay-100" data-i18n="hero_h1" data-html="true">
+        AI-powered coding assistant <br>
+        built for <em>developers</em>
+      </h1>
+      <p class="fade-up delay-200" data-i18n="hero_desc">
+        Work with large language models directly in your terminal. Build, debug, and ship with an execution loop that keeps you in control. Describe what you need, and tcode handles the tools.
+      </p>
+      <div class="hero-actions fade-up delay-300">
+        <a class="btn btn-primary" href="../README.md" data-i18n="btn_docs">
+          Read Documentation
+        </a>
+        <a class="btn btn-secondary" href="../ARCHITECTURE.md" data-i18n="btn_arch">
+          Architecture
+        </a>
+      </div>
+    </header>
+
+    <!-- Terminal Showcase -->
+    <div class="showcase container fade-up delay-300">
+      <div class="terminal-window">
+        <div class="t-panel">
+          <div class="t-panel-title">api.anthropic.com</div>
+          <div class="t-header-title">tcode</div>
+          <div class="t-header-desc" data-i18n="t_header_desc">Terminal coding assistant with a card-style session layout.</div>
+
+          <div class="t-stats-line">
+            <span class="t-stats-label">tcode</span> <span class="t-stats-value">~/code/myproject</span>
+            <span class="t-stats-label">[session]</span> <span class="t-stats-value">a7c9e2b1</span>
+            <span class="t-stats-label">[provider]</span> <span class="t-stats-value">api.anthropic.com</span>
+            <span class="t-stats-label">[model]</span> <span class="t-stats-value">claude-opus-4-6</span>
+            <span class="t-stats-label">[ctx]</span> <span class="t-stats-value green">42% usage+est</span>
+            <span class="t-stats-label">[messages]</span> <span class="t-stats-value">3</span>
+            <span class="t-stats-label">[events]</span> <span class="t-stats-value">6</span>
+            <span class="t-stats-label">[skills]</span> <span class="t-stats-value green">13</span>
+            <span class="t-stats-label">[mcp]</span> <span class="t-stats-value">1</span>
+            <span class="t-stats-label">[trace]</span> <span class="t-stats-value green">on</span>
+          </div>
+          <div class="t-cwd">cwd: ~/code/myproject | extra allowed dirs: ~/code/lib, ~/cod...</div>
+        </div>
+
+        <div class="t-panel">
+          <div class="t-panel-title" data-i18n="t_events">6 events</div>
+          <div class="t-feed-title" data-i18n="t_feed">session feed</div>
+          <div class="t-message" style="color: #5c7080;">.</div>
+
+          <div class="t-role" data-i18n="t_role">assistant</div>
+          <div class="t-message" data-i18n="t_hello" data-html="true">Hello! 👋<br><br>I'm tcode, your terminal coding assistant. I can help you with:</div>
+          <ul class="t-list">
+            <li><span class="t-list-icon">🔍</span> <span data-i18n="t_l1">Inspecting code and repositories</span></li>
+            <li><span class="t-list-icon">📝</span> <span data-i18n="t_l2">Editing files with review-before-write approvals</span></li>
+            <li><span class="t-list-icon">🔨</span> <span data-i18n="t_l3">Running commands and tracking background tasks</span></li>
+            <li><span class="t-list-icon">💾</span> <span data-i18n="t_l4">Saving, resuming, renaming, and forking sessions</span></li>
+            <li><span class="t-list-icon">📉</span> <span data-i18n="t_l5">Keeping long conversations usable with usage-aware compacting</span></li>
+            <li><span class="t-list-icon">🎯</span> <span data-i18n="t_l6">Extending workflows through local Skills and MCP tools</span></li>
+            <li><span class="t-list-icon">🔍</span> <span data-i18n="t_l7">Debugging agent behavior with built-in tracing</span></li>
+          </ul>
+          <div class="t-message" data-i18n="t_ask">What would you like to work on today?</div>
+        </div>
+
+        <div class="t-panel">
+          <div class="t-prompt-title" data-i18n="t_prompt">prompt</div>
+          <div class="t-prompt-hints" data-i18n="t_hints" data-html="true">
+            <strong>prompt</strong> Enter send | /help commands | Esc clear | Ctrl+C exit
+          </div>
+          <div class="t-input-line">
+            <span class="t-input-prompt">tcode&gt;</span>
+            <span style="color: #8b949e;" data-i18n="t_input">Ask for code, files, tasks, or MCP tools</span><span class="t-input-cursor"></span>
+          </div>
+        </div>
+
+        <div class="t-footer-bar">
+          <div data-i18n="t_ready">Ready</div>
+          <div class="t-footer-right" data-i18n="t_tools" data-html="true">tools <span>on</span> | skills <span>on</span> | trace <span>on</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tech Strip -->
+    <div class="logo-strip">
+      <div class="container">
+        <p data-i18n="tech_strip">Built with modern architectures</p>
+        <div class="logo-strip-flex">
+          <span data-i18n="tech_1">Model-Tool-Loop</span>
+          <span data-i18n="tech_2">Terminal UI</span>
+          <span data-i18n="tech_3">MCP Protocol</span>
+          <span data-i18n="tech_4">Diff Review</span>
+          <span data-i18n="tech_5">Local Skills</span>
+          <span data-i18n="tech_6">Session Resume</span>
+          <span data-i18n="tech_7">Context Accounting</span>
+          <span data-i18n="tech_8">Agent Tracing</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Why tcode Section -->
+    <section id="why" class="container" style="padding-top: 0; padding-bottom: 80px;">
+      <div style="background: var(--bg-surface); border: 1px solid var(--border-light); border-radius: var(--radius-lg); padding: 56px; box-shadow: var(--shadow-md); position: relative; overflow: hidden;">
+        <div style="position: absolute; top: -50%; right: -10%; width: 400px; height: 400px; background: radial-gradient(circle, rgba(56,189,248,0.05) 0%, transparent 70%); border-radius: 50%; pointer-events: none;"></div>
+
+        <div style="position: relative; z-index: 1;">
+          <h2 data-i18n="why_title" style="font-family: var(--font-serif); font-size: 2.2rem; font-weight: 400; margin-bottom: 20px; color: var(--text-primary);">Inspired by Claude Code</h2>
+          <p data-i18n="why_desc" style="font-size: 1.05rem; color: var(--text-secondary); margin-bottom: 40px; line-height: 1.7; max-width: 640px;">
+            tcode is designed as an architectural reference implementation. It intentionally strips away bloated platform features to focus entirely on the core AI-developer interaction loop. It is the perfect fit if you are looking for:
+          </p>
+
+          <div class="grid" style="row-gap: 32px;">
+            <div class="span-6">
+              <h3 data-i18n="why_1_h" style="font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: var(--text-primary);">A lightweight assistant</h3>
+              <p data-i18n="why_1_p" style="color: var(--text-secondary); font-size: 0.95rem; line-height: 1.6;">Instead of a heavy IDE platform, getting a standalone assistant focused purely on the coding workflow.</p>
+            </div>
+            <div class="span-6">
+              <h3 data-i18n="why_2_h" style="font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: var(--text-primary);">Clean terminal UI</h3>
+              <p data-i18n="why_2_p" style="color: var(--text-secondary); font-size: 0.95rem; line-height: 1.6;">Native tool calling, transcript scrolling, and complete command workflows without leaving the terminal.</p>
+            </div>
+            <div class="span-6">
+              <h3 data-i18n="why_3_h" style="font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: var(--text-primary);">Readable codebase</h3>
+              <p data-i18n="why_3_p" style="color: var(--text-secondary); font-size: 0.95rem; line-height: 1.6;">A minimal project structure extremely suitable for reading, secondary development, and private customization.</p>
+            </div>
+            <div class="span-6">
+              <h3 data-i18n="why_4_h" style="font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; color: var(--text-primary);">Observable agent behavior</h3>
+              <p data-i18n="why_4_p" style="color: var(--text-secondary); font-size: 0.95rem; line-height: 1.6;">Built-in tracing records agent turns, model I/O, tool events, and loop decisions — perfect for debugging and learning.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="container">
+      <div class="section-header fade-up">
+        <h2 data-i18n="feat_title">Meets you where you code</h2>
+        <p data-i18n="feat_desc">A minimalist design focusing on the core tool-calling execution loop, providing safety, observability, and high extensibility.</p>
+      </div>
+
+      <div class="grid">
+
+        <div class="feature-card span-6 fade-up">
+          <div class="feature-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          </div>
+          <h3 data-i18n="feat_1_title">Core execution loop</h3>
+          <p data-i18n="feat_1_desc" data-html="true">tcode manages a full multi-step tool execution loop (<code>model -> tool -> model</code>) in a single turn, providing seamless context processing without leaving the terminal.</p>
+          <ul class="feature-list">
+            <li data-i18n="feat_1_l1">Full-screen TUI with transcript scrolling</li>
+            <li data-i18n="feat_1_l2">Separation of progress and final answers</li>
+            <li data-i18n="feat_1_l3">Feedback injection upon rejection</li>
+          </ul>
+        </div>
+
+        <div class="feature-card span-6 fade-up delay-100">
+          <div class="feature-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+          <h3 data-i18n="feat_2_title">You're in control</h3>
+          <p data-i18n="feat_2_desc">Safety shouldn't be an afterthought. tcode brings permission validation and code review straight into the primary execution pathway.</p>
+          <ul class="feature-list">
+            <li data-i18n="feat_2_l1">Standard Unified Diff view before writing</li>
+            <li data-i18n="feat_2_l2">Path and command allowlist verification</li>
+            <li data-i18n="feat_2_l3">Interception of dangerous actions</li>
+          </ul>
+        </div>
+
+        <div class="feature-card span-4 fade-up">
+          <div class="feature-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2v20M2 12h20"/></svg>
+          </div>
+          <h3 data-i18n="feat_3_title">Skills & MCP</h3>
+          <p data-i18n="feat_3_desc" data-html="true">Extend capabilities endlessly. tcode discovers local <code>SKILL.md</code> instructions and seamlessly mounts stdio and streamable HTTP MCP servers.</p>
+        </div>
+
+        <div class="feature-card span-8 fade-up delay-100">
+          <h3 data-i18n="feat_4_title">Built-in Toolchain</h3>
+          <p data-i18n="feat_4_desc" data-html="true">Local file system management, command execution, and MCP helpers are centralized through a standardized tool protocol, ready to be called by the model at any time.</p>
+          <div class="tools-flex">
+            <span class="tool-tag">list_files</span>
+            <span class="tool-tag">grep_files</span>
+            <span class="tool-tag">read_file</span>
+            <span class="tool-tag">write_file</span>
+            <span class="tool-tag">edit_file</span>
+            <span class="tool-tag">patch_file</span>
+            <span class="tool-tag">modify_file</span>
+            <span class="tool-tag">run_command</span>
+            <span class="tool-tag">web_fetch</span>
+            <span class="tool-tag">web_search</span>
+            <span class="tool-tag">ask_user</span>
+            <span class="tool-tag">load_skill</span>
+            <span class="tool-tag">list_mcp_resources</span>
+            <span class="tool-tag">read_mcp_resource</span>
+            <span class="tool-tag">list_mcp_prompts</span>
+            <span class="tool-tag">get_mcp_prompt</span>
+          </div>
+        </div>
+
+        <div class="feature-card span-6 fade-up">
+          <div class="feature-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+          </div>
+          <h3 data-i18n="feat_5_title">Sessions that survive exits</h3>
+          <p data-i18n="feat_5_desc" data-html="true">Every turn is appended to a per-project JSONL session log. Resume with <code>--resume</code>, open the picker with <code>/resume</code>, rename the current thread, or fork a clean branch of work.</p>
+          <ul class="feature-list">
+            <li data-i18n="feat_5_l1">Append-only session events with parent links</li>
+            <li data-i18n="feat_5_l2">Resume, rename, fork, compact, and expiry cleanup</li>
+            <li data-i18n="feat_5_l3">Transcript rebuild from the stored event stream</li>
+          </ul>
+        </div>
+
+        <div class="feature-card span-6 fade-up delay-100">
+          <div class="feature-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-7"/><path d="M14 7h5v5"/></svg>
+          </div>
+          <h3 data-i18n="feat_6_title">Long-context controls</h3>
+          <p data-i18n="feat_6_desc" data-html="true">Provider usage anchors the context badge and auto-compact trigger. Huge tool results move to local storage with a preview, so the model keeps the important signal without carrying every byte of output.</p>
+          <ul class="feature-list">
+            <li data-i18n="feat_6_l1">Provider usage plus estimated tail accounting</li>
+            <li data-i18n="feat_6_l2">Manual and automatic context compaction</li>
+            <li data-i18n="feat_6_l3">Large tool outputs saved outside the prompt context</li>
+          </ul>
+        </div>
+
+        <div class="feature-card span-12 fade-up">
+          <div class="feature-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          </div>
+          <h3 data-i18n="feat_7_title">Built-in Agent Tracing</h3>
+          <p data-i18n="feat_7_desc">Optional tracing records every agent turn, model input/output, tool call, and loop decision. Debug agent behavior, inspect tool execution, and export to Langfuse for deeper analysis.</p>
+          <ul class="feature-list">
+            <li data-i18n="feat_7_l1">Turn-level span recording</li>
+            <li data-i18n="feat_7_l2">Langfuse / OpenTelemetry export</li>
+            <li data-i18n="feat_7_l3">Zero performance impact when disabled</li>
+          </ul>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Architecture Section -->
+    <section id="architecture" style="background-color: var(--bg-surface); padding: 100px 0; margin-top: 40px; border-top: 1px solid var(--border-light);">
+      <div class="container">
+        <div class="section-header fade-up">
+          <h2 data-i18n="arch_title">Architecture</h2>
+          <p data-i18n="arch_desc">tcode is not a bloated platform. It's a precisely structured codebase centered around the main execution loop.</p>
+        </div>
+
+        <div class="arch-list">
+          <div class="arch-item fade-up">
+            <code>src/agent-loop.ts</code>
+            <p data-i18n="arch_1_desc">The core multi-turn tool-calling loop that drives the entire asynchronous conversational logic.</p>
+          </div>
+          <div class="arch-item fade-up delay-100">
+            <code>src/permissions.ts</code>
+            <p data-i18n="arch_2_desc">The security sentinel handling path allowlists, command reviews, and intercepting unauthorized writes.</p>
+          </div>
+          <div class="arch-item fade-up delay-200">
+            <code>src/mcp.ts</code>
+            <p data-i18n="arch_3_desc">The external connector managing MCP client connections and wrapping remote tool functions for local execution.</p>
+          </div>
+          <div class="arch-item fade-up delay-300">
+            <code>src/tracing.ts</code>
+            <p data-i18n="arch_4_desc">Optional agent-loop tracing that records turns, model I/O, tool events, and exports to Langfuse.</p>
+          </div>
+          <div class="arch-item fade-up">
+            <code>src/session.ts</code>
+            <p data-i18n="arch_5_desc">Append-only project session storage with resume, rename, fork, compact boundaries, transcript rebuild, and expiry cleanup.</p>
+          </div>
+          <div class="arch-item fade-up delay-100">
+            <code>src/utils/token-estimator.ts</code>
+            <p data-i18n="arch_6_desc">Provider-usage-first context accounting with local fallback and estimated tail messages after the latest usage boundary.</p>
+          </div>
+          <div class="arch-item fade-up delay-200">
+            <code>src/utils/tool-result-storage.ts</code>
+            <p data-i18n="arch_7_desc">Large tool-output persistence that keeps a compact preview in context and stores the full output on disk.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer style="background-color: var(--bg-base); margin-top: 0;">
+    <div class="container">
+      <div class="footer-grid">
+
+        <div class="footer-brand">
+          <h4>
+            <img src="./logo.svg" alt="tcode Logo" style="width: 18px; height: 18px; border-radius: 3px;" />
+            tcode
+          </h4>
+          <p data-i18n="foot_desc">A lightweight terminal coding assistant for local development workflows. Built for learning, experimentation, resumable sessions, and high efficiency.</p>
+        </div>
+
+        <div class="footer-col">
+          <h5 data-i18n="foot_prod">Product</h5>
+          <a href="#features" data-i18n="nav_features">Features</a>
+          <a href="#architecture" data-i18n="nav_arch">Architecture</a>
+          <a href="../ROADMAP.md" data-i18n="nav_roadmap">Roadmap</a>
+        </div>
+
+        <div class="footer-col">
+          <h5 data-i18n="foot_devs">Developers</h5>
+          <a href="../ARCHITECTURE.md" data-i18n="foot_docs">Documentation</a>
+          <a href="../CLAUDE_CODE_PATTERNS.md" data-i18n="foot_patterns">Design Patterns</a>
+          <a href="../CONTRIBUTING.md" data-i18n="foot_contrib">Contributing</a>
+        </div>
+
+      </div>
+
+      <div style="margin-top: 60px; padding-top: 40px; border-top: 1px solid var(--border-light);">
+        <p style="color: var(--text-tertiary); font-size: 0.85rem;" data-i18n="foot_rights">© 2026 tcode. MIT Licensed.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const i18n = {
+      en: {
+        page_title: "tcode | AI-powered terminal coding assistant",
+        nav_features: "Features",
+        nav_arch: "Architecture",
+        nav_roadmap: "Roadmap",
+        nav_docs: "Docs",
+        badge_beta: "Sessions, MCP, tracing, and long-context controls are available",
+        hero_h1: "AI-powered coding assistant <br> built for <em>developers</em>",
+        hero_desc: "Work with large language models directly in your terminal. Build, debug, and ship with an execution loop that keeps you in control, remembers your sessions, and manages long context as the work grows.",
+        btn_docs: "Read Documentation",
+        btn_arch: "Architecture",
+        t_header_desc: "Terminal coding assistant with a card-style session layout.",
+        t_events: "6 events",
+        t_feed: "session feed",
+        t_role: "assistant",
+        t_hello: "Hello! 👋<br><br>I'm tcode, your terminal coding assistant. I can help you with:",
+        t_l1: "Inspecting code and repositories",
+        t_l2: "Editing files with review-before-write approvals",
+        t_l3: "Running commands and tracking background tasks",
+        t_l4: "Saving, resuming, renaming, and forking sessions",
+        t_l5: "Keeping long conversations usable with usage-aware compacting",
+        t_l6: "Extending workflows through local Skills and MCP tools",
+        t_l7: "Debugging agent behavior with built-in tracing",
+        t_ask: "What would you like to work on today?",
+        t_prompt: "prompt",
+        t_hints: "<strong>prompt</strong> Enter send | /help commands | Esc clear | Ctrl+C exit",
+        t_input: "Ask for code, files, tasks, or MCP tools",
+        t_ready: "Ready",
+        t_tools: "tools <span>on</span> | skills <span>on</span> | trace <span>on</span>",
+        tech_strip: "Built with modern architectures",
+        tech_1: "Model-Tool-Loop",
+        tech_2: "Terminal UI",
+        tech_3: "MCP Protocol",
+        tech_4: "Diff Review",
+        tech_5: "Local Skills",
+        tech_6: "Session Resume",
+        tech_7: "Context Accounting",
+        tech_8: "Agent Tracing",
+        why_title: "Why tcode?",
+        why_desc: "tcode heavily borrows design patterns from Claude Code, stripping away bloated platform features to focus entirely on the core AI-developer interaction loop. It is the perfect fit if you are looking for:",
+        why_1_h: "A lightweight assistant",
+        why_1_p: "Instead of a heavy IDE platform, getting a standalone assistant focused purely on the coding workflow.",
+        why_2_h: "Clean terminal UI",
+        why_2_p: "Native tool calling, transcript scrolling, and complete command workflows without leaving the terminal.",
+        why_3_h: "Readable codebase",
+        why_3_p: "A minimal project structure extremely suitable for reading, secondary development, and private customization.",
+        why_4_h: "Observable agent behavior",
+        why_4_p: "Built-in tracing records agent turns, model I/O, tool events, and loop decisions — perfect for debugging and learning.",
+        feat_title: "Meets you where you code",
+        feat_desc: "A minimalist design focusing on the core tool-calling execution loop, providing safety, observability, and high extensibility.",
+        feat_1_title: "Core execution loop",
+        feat_1_desc: "tcode manages a full multi-step tool execution loop (<code>model -> tool -> model</code>) in a single turn, providing seamless context processing without leaving the terminal.",
+        feat_1_l1: "Full-screen TUI with transcript scrolling",
+        feat_1_l2: "Separation of progress and final answers",
+        feat_1_l3: "Feedback injection upon rejection",
+        feat_2_title: "You're in control",
+        feat_2_desc: "Safety shouldn't be an afterthought. tcode brings permission validation and code review straight into the primary execution pathway.",
+        feat_2_l1: "Standard Unified Diff view before writing",
+        feat_2_l2: "Path and command allowlist verification",
+        feat_2_l3: "Interception of dangerous actions with responsive approval controls",
+        feat_3_title: "Skills & MCP",
+        feat_3_desc: "Extend capabilities endlessly. tcode discovers local <code>SKILL.md</code> instructions and seamlessly mounts stdio and streamable HTTP MCP servers.",
+        feat_4_title: "Built-in Toolchain",
+        feat_4_desc: "Local file ops, command execution (including single-string calls like <code>git status</code>), structured user clarification via <code>ask_user</code>, and full MCP helpers are centralized through one standardized tool protocol.",
+        feat_5_title: "Sessions that survive exits",
+        feat_5_desc: "Every turn is appended to a per-project JSONL session log. Resume with <code>--resume</code>, open the picker with <code>/resume</code>, rename the current thread, or fork a clean branch of work.",
+        feat_5_l1: "Append-only session events with parent links",
+        feat_5_l2: "Resume, rename, fork, compact, and expiry cleanup",
+        feat_5_l3: "Transcript rebuild from the stored event stream",
+        feat_6_title: "Long-context controls",
+        feat_6_desc: "Provider usage anchors the context badge and auto-compact trigger. Huge tool results move to local storage with a preview, so the model keeps the important signal without carrying every byte of output.",
+        feat_6_l1: "Provider usage plus estimated tail accounting",
+        feat_6_l2: "Manual and automatic context compaction",
+        feat_6_l3: "Large tool outputs saved outside the prompt context",
+        feat_7_title: "Built-in Agent Tracing",
+        feat_7_desc: "Optional tracing records every agent turn, model input/output, tool call, and loop decision. Debug agent behavior, inspect tool execution, and export to Langfuse for deeper analysis.",
+        feat_7_l1: "Turn-level span recording",
+        feat_7_l2: "Langfuse / OpenTelemetry export",
+        feat_7_l3: "Zero performance impact when disabled",
+        arch_title: "Architecture",
+        arch_desc: "tcode is not a bloated platform. It's a precisely structured codebase centered around the main execution loop.",
+        arch_1_desc: "The core multi-turn tool-calling loop that drives the entire asynchronous conversational logic.",
+        arch_2_desc: "The security sentinel handling path allowlists, command reviews, and intercepting unauthorized writes.",
+        arch_3_desc: "The external connector managing MCP client connections and wrapping remote tool functions for local execution.",
+        arch_4_desc: "Optional agent-loop tracing that records turns, model I/O, tool events, and exports to Langfuse.",
+        arch_5_desc: "Append-only project session storage with resume, rename, fork, compact boundaries, transcript rebuild, and expiry cleanup.",
+        arch_6_desc: "Provider-usage-first context accounting with local fallback and estimated tail messages after the latest usage boundary.",
+        arch_7_desc: "Large tool-output persistence that keeps a compact preview in context and stores the full output on disk.",
+        foot_desc: "A lightweight terminal coding assistant for local development workflows. Built for learning, experimentation, resumable sessions, and high efficiency.",
+        foot_prod: "Product",
+        foot_devs: "Developers",
+        foot_docs: "Documentation",
+        foot_patterns: "Design Patterns",
+        foot_contrib: "Contributing",
+        foot_rights: "© 2026 tcode. MIT Licensed."
+      },
+      zh: {
+        page_title: "tcode | 极简终端 AI 编码助手",
+        nav_features: "核心特性",
+        nav_arch: "架构地图",
+        nav_roadmap: "演进路线",
+        nav_docs: "文档",
+        badge_beta: "会话、MCP、Tracing 与长上下文控制现已可用",
+        hero_h1: "专为 <em>开发者</em> 构建的<br>终端 AI 助手",
+        hero_desc: "在终端中直接与 LLM 协同工作。把终端助手做「小」，但把核心闭环做「全」：保留 model-tool-loop、可恢复会话、长上下文管理和 agent tracing，随时掌控每一次执行。",
+        btn_docs: "阅读文档",
+        btn_arch: "架构说明",
+        t_header_desc: "采用卡片式会话布局的终端编码助手。",
+        t_events: "6 条事件",
+        t_feed: "会话内容",
+        t_role: "assistant",
+        t_hello: "你好！👋<br><br>我是 tcode，你的终端编码助手。我可以帮你：",
+        t_l1: "审查代码和工程目录",
+        t_l2: "通过写入前 review 审批编辑文件",
+        t_l3: "运行命令并跟踪后台任务",
+        t_l4: "保存、恢复、重命名和分叉会话",
+        t_l5: "用 usage-aware compact 维持长对话可用性",
+        t_l6: "通过本地 Skills 与 MCP 工具扩展工作流",
+        t_l7: "通过内置 tracing 调试 agent 行为",
+        t_ask: "今天你想开发点什么？",
+        t_prompt: "输入",
+        t_hints: "<strong>输入栏</strong> Enter 发送 | /help 命令列表 | Esc 清空 | Ctrl+C 退出",
+        t_input: "询问代码、文件、任务或 MCP 工具",
+        t_ready: "就绪",
+        t_tools: "工具 <span>已开启</span> | 技能 <span>已开启</span> | trace <span>已开启</span>",
+        tech_strip: "构建于现代架构之上",
+        tech_1: "模型-工具-闭环",
+        tech_2: "TUI 终端界面",
+        tech_3: "MCP 协议扩展",
+        tech_4: "Diff 变更审查",
+        tech_5: "本地工作流指令",
+        tech_6: "会话恢复",
+        tech_7: "上下文记账",
+        tech_8: "Agent Tracing",
+        why_title: "为什么选择 tcode",
+        why_desc: "tcode 深度借鉴了 Claude Code 的设计模式，剥离了臃肿的平台级特性，专一地打磨底层 AI 开发者的交互循环。如果你希望得到下面这些东西，tcode 会非常合适：",
+        why_1_h: "一个轻量的助手",
+        why_1_p: "而不是庞大的 IDE 平台。一个单纯为 Coding Agent 工作流打造的独立组件。",
+        why_2_h: "干净的终端 UI",
+        why_2_p: "自带原生 Tool calling、对话日志滚动机制和完整的命令执行工作流。",
+        why_3_h: "极具阅读性的代码库",
+        why_3_p: "去芜存菁，结构紧凑。极其适合作为实验基座、二次开发或定制私有助理的地基。",
+        why_4_h: "可观测的 agent 行为",
+        why_4_p: "内置 tracing 记录 agent turn、模型 I/O、工具事件和 loop 决策——调试和学习利器。",
+        feat_title: "契合你的本地工作流",
+        feat_desc: "极简的架构设计，专注于底层工具调用的执行闭环。摒弃臃肿，保留高扩展性、可观测性与安全纯粹。",
+        feat_1_title: "核心工作流循环",
+        feat_1_desc: "实现完整的单轮多步工具调用（<code>model -> tool -> model</code>），无需离开终端，无缝提供连续的上下文推理闭环。",
+        feat_1_l1: "全屏 TUI 界面与运行日志滚动",
+        feat_1_l2: "执行过程 (Progress) 与最终结果分离",
+        feat_1_l3: "支持拒绝执行并反馈修正建议给模型",
+        feat_2_title: "安全且可控的边界",
+        feat_2_desc: "安全不能只是附加项。tcode 巧妙地将权限验证和代码 Diff 审查置入了主执行链路内，而非外围补丁。",
+        feat_2_l1: "写入代码前展示标准 Unified Diff 进行确认",
+        feat_2_l2: "基于白名单规则的路径与命令审查",
+        feat_2_l3: "从框架底层拦截危险操作，并保持审批交互稳定可控",
+        feat_3_title: "Skills & MCP 无限扩展",
+        feat_3_desc: "拥抱生态标准。tcode 可自动发现 <code>SKILL.md</code> 组织的工作流，并无缝挂载 stdio 和 streamable HTTP MCP 服务器，无穷扩展能力边界。",
+        feat_4_title: "内置底层工具链",
+        feat_4_desc: "本地文件操作、Shell 命令执行（含 <code>git status</code> 这类单字符串命令）、通过 <code>ask_user</code> 的结构化澄清，以及完整 MCP helper，统一收口到标准化工具协议。",
+        feat_5_title: "退出后仍可恢复的会话",
+        feat_5_desc: "每轮对话都会追加写入按项目隔离的 JSONL 会话日志。可用 <code>--resume</code> 恢复，用 <code>/resume</code> 打开选择器，也可以重命名当前线程或分叉出独立副本。",
+        feat_5_l1: "追加写入的会话事件与 parent 链",
+        feat_5_l2: "恢复、重命名、分叉、压缩与过期清理",
+        feat_5_l3: "从已存事件流重建 transcript",
+        feat_6_title: "长上下文控制",
+        feat_6_desc: "provider usage 会驱动 context badge 和自动压缩触发。超大工具结果会移动到本地存储，只在上下文中留下预览，让模型保留关键信号而不是背负完整输出。",
+        feat_6_l1: "provider usage + tail estimate 记账",
+        feat_6_l2: "手动与自动上下文压缩",
+        feat_6_l3: "大工具输出保存到 prompt context 之外",
+        feat_7_title: "内置 Agent Tracing",
+        feat_7_desc: "可选 tracing 记录每个 agent turn、模型输入输出、工具调用和 loop 决策。调试 agent 行为、检查工具执行、导出到 Langfuse 做深度分析。",
+        feat_7_l1: "Turn 级别 span 记录",
+        feat_7_l2: "Langfuse / OpenTelemetry 导出",
+        feat_7_l3: "关闭时零性能开销",
+        arch_title: "核心架构地图",
+        arch_desc: "tcode 不是一个"大而全"的平台。它是一个高度克制、围绕主循环结构化裁剪的极简基座代码库。",
+        arch_1_desc: "多步模型/工具循环引擎，驱动整个终端异步对话交互的心脏。",
+        arch_2_desc: "核心安全哨兵组件。负责处理路径验证、命令限制审查以及写入操作的阻断拦截。",
+        arch_3_desc: "外部能力连接器。管理 MCP Client 的标准连接，并负责将远端工具动态映射封装为本地可调用工具。",
+        arch_4_desc: "可选 agent-loop tracing，记录 turn、模型 I/O、工具事件，并导出到 Langfuse。",
+        arch_5_desc: "追加写入的项目会话存储，支持恢复、重命名、分叉、compact boundary、transcript 重建和过期清理。",
+        arch_6_desc: "provider usage 优先的上下文记账，支持本地 fallback 和最新 usage boundary 之后的 tail estimate。",
+        arch_7_desc: "大工具输出持久化：上下文保留紧凑预览，完整输出保存到磁盘。",
+        foot_desc: "面向本地开发工作流的轻量终端 AI 编码助手。专为学习、实验设计、可恢复会话与高效能代码创作而构建。",
+        foot_prod: "产品",
+        foot_devs: "开发者",
+        foot_docs: "架构文档",
+        foot_patterns: "设计模式",
+        foot_contrib: "贡献指南",
+        foot_rights: "© 2026 tcode. 遵循 MIT 开源协议。"
+      }
+    };
+
+    let currentLang = localStorage.getItem('tcode_lang') || 'en';
+
+    function updateContent() {
+      const elements = document.querySelectorAll('[data-i18n]');
+      const dict = i18n[currentLang];
+
+      elements.forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (dict[key]) {
+          if (el.hasAttribute('data-html')) {
+            el.innerHTML = dict[key];
+          } else {
+            el.textContent = dict[key];
+          }
         }
+      });
+
+      document.documentElement.lang = currentLang;
+
+      const btn = document.getElementById('langToggle');
+      if (btn) {
+        btn.textContent = currentLang === 'en' ? 'EN / 中' : '中 / EN';
       }
-    </style>
-  </head>
-  <body>
-    <main>
-      <section class="hero">
-        <div>
-          <h1>tcode</h1>
-          <p class="lead">
-            A lightweight terminal coding assistant with local tools, permissions,
-            skills, MCP integration, ask-user clarification, and optional tracing.
-          </p>
-          <div class="actions">
-            <a class="button primary" href="../README.md">Read the docs</a>
-            <a class="button" href="../ARCHITECTURE.md">Architecture</a>
-            <a class="button" href="../ROADMAP.md">Roadmap</a>
-          </div>
-        </div>
+    }
 
-        <div class="terminal" aria-label="terminal preview">
-          <div class="bar">
-            <span class="dot"></span>
-            <span class="dot"></span>
-            <span class="dot"></span>
-          </div>
-          <pre><code>$ tcode
+    document.getElementById('langToggle').addEventListener('click', () => {
+      currentLang = currentLang === 'en' ? 'zh' : 'en';
+      localStorage.setItem('tcode_lang', currentLang);
+      updateContent();
+    });
 
-╭─ tcode ─────────────────────────╮
-│ cwd: ~/project                   │
-│ tools: files, command, ask_user  │
-│ skills: 2   mcp: 1   trace: on  │
-╰─────────────────────────────────╯
+    document.addEventListener("DOMContentLoaded", () => {
+      updateContent();
 
-You: add a config option and verify it
-tcode: inspecting files...
-tcode: applying patch...
-tcode: running type check...</code></pre>
-        </div>
-      </section>
+      const navbar = document.getElementById('navbar');
+      window.addEventListener('scroll', () => {
+        if (window.scrollY > 20) {
+          navbar.classList.add('scrolled');
+        } else {
+          navbar.classList.remove('scrolled');
+        }
+      });
 
-      <section class="grid">
-        <article class="card">
-          <span class="tag">Agent Loop</span>
-          <h2>Small Enough To Study</h2>
-          <p>
-            The core loop stays compact while supporting progress, tool calls,
-            structured user clarification via ask_user, retries, and final responses.
-          </p>
-        </article>
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+            observer.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.1, rootMargin: "0px 0px -50px 0px" });
 
-        <article class="card">
-          <span class="tag">Safety</span>
-          <h2>Review Before Writes</h2>
-          <p>
-            File edits, external paths, and risky commands flow through explicit
-            permission and review boundaries with responsive approval controls.
-          </p>
-        </article>
-
-        <article class="card">
-          <span class="tag">Extensions</span>
-          <h2>Toolchain, Skills And MCP</h2>
-          <p>
-            Single-string commands like git status, local skills, and stdio MCP
-            servers all plug into the same standardized tool protocol.
-          </p>
-        </article>
-      </section>
-
-      <footer>
-        Open this page locally from <code>docs/index.html</code>.
-      </footer>
-    </main>
-  </body>
+      document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
+    });
+  </script>
+</body>
 </html>

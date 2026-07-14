@@ -1,35 +1,89 @@
 # tcode
 
-[English](./README.md) | [Architecture](./ARCHITECTURE.md) | [中文架构说明](./ARCHITECTURE_ZH.md) | [贡献指南](./CONTRIBUTING_ZH.md) | [路线图](./ROADMAP_ZH.md) | [通过 tcode 学习 Claude Code 设计](./CLAUDE_CODE_PATTERNS_ZH.md) | [License](./LICENSE)
+<p align="center">
+  <img src="./docs/logo.svg" alt="tcode Logo" width="180" />
+</p>
 
-一个轻量级终端编码助手，用于本地开发工作流。
+<h2 align="center">tcode</h2>
 
-tcode 延续 MiniCode 的紧凑、终端优先设计：核心 agent loop 保持足够小，便于学习和定制，同时支持实用文件工具、权限审批、本地 skills、MCP 动态工具和 agent tracing。
+<p align="center">
+  <img src="https://img.shields.io/badge/Editor-tcode-D97757?style=for-the-badge" alt="Editor: tcode" />
+  <img src="https://img.shields.io/badge/%23tcode-Project-B85C3F?style=for-the-badge" alt="#tcode" />
+  <img src="https://img.shields.io/badge/%23lightweight-Focus-F0EBE1?style=for-the-badge&labelColor=8B8B8B" alt="#lightweight" />
+</p>
 
-## 概览
+---
 
-tcode 围绕一条实用的终端 agent 闭环构建：
+<p align="center">
+  一个轻量且高效的编码工具。为速度而生，为简洁而建。
+</p>
+
+[English](./README.md) | [架构说明](./ARCHITECTURE_ZH.md) | [贡献规范](./CONTRIBUTING_ZH.md) | [路线图](./ROADMAP_ZH.md) | [通过 tcode 学习 Claude Code 设计](./CLAUDE_CODE_PATTERNS_ZH.md) | [技术说明](./TECHNICAL_OVERVIEW_ZH.md) | [License](./LICENSE)
+
+一个面向本地开发工作流的轻量级终端编码助手。
+
+tcode 用更小的实现体量，提供了类 Claude Code 的工作流体验和架构思路，因此非常适合学习、实验，以及继续做自己的定制化开发。
+
+## 项目简介
+
+tcode 围绕一个实用的 terminal-first agent loop 构建：
 
 - 接收用户请求
 - 检查当前工作区
-- 按需调用工具
-- 写入前展示可 review 的改动
-- 在同一终端会话中返回结果
+- 在需要时调用工具
+- 修改文件前先 review
+- 在同一个终端会话里返回最终结果
 
-项目刻意保持紧凑，让控制流、工具模型、追踪行为和 TUI 组件都容易理解和扩展。
+整个项目有意保持紧凑，这样主控制流、工具模型、追踪行为和 TUI 组件都更容易理解和扩展。
 
-## 主要功能
+## 目录
+
+- [产品介绍展示页](#产品介绍展示页)
+- [为什么选择 tcode](#为什么选择-tcode)
+- [功能特性](#功能特性)
+- [安装](#安装)
+- [快速开始](#快速开始)
+- [命令](#命令)
+- [长会话与上下文管理](#长会话与上下文管理)
+- [配置](#配置)
+- [Skills 与 MCP 用法](#skills-与-mcp-用法)
+- [Tracing](#tracing)
+- [项目结构](#项目结构)
+- [代码规模](#代码规模)
+- [架构文档](#架构文档)
+- [贡献规范](#贡献规范)
+- [路线图](#路线图)
+- [通过 tcode 学习 Claude Code 设计](#通过-tcode-学习-claude-code-设计)
+- [开发说明](#开发说明)
+
+## 产品介绍展示页
+
+- 在浏览器中打开 [docs/index.html](./docs/index.html)，即可查看可视化产品介绍页面。
+
+## 为什么选择 tcode
+
+如果你希望得到下面这些东西，tcode 会很合适：
+
+- 一个轻量级 coding assistant，而不是庞大的平台
+- 一个卡片式终端 UI，带 tool calling、transcript 和命令工作流
+- 一个很适合阅读和二次开发的小代码库
+- 一个可用于学习类 Claude Code agent 架构的参考实现
+- 可选本地 tracing 观察 agent loop 和模型/工具事件
+
+## 功能特性
 
 ### 核心工作流
 
-- 单个用户请求内支持多步工具执行
-- `model -> tool -> model` 循环
-- 全屏终端界面
+- 单轮支持多步工具执行
+- `model -> tool -> model` 闭环
+- 全屏终端交互界面
 - 卡片式 header、session feed、prompt、approval、activity 和 footer 面板
-- 输入历史、会话滚动和 slash command 菜单
-- 通过 `SKILL.md` 发现本地 skills
-- 通过 stdio 或 streamable HTTP 动态加载 MCP 工具
-- 通过通用 MCP helper 工具读取 MCP resources 和 prompts
+- 输入历史、transcript 滚动和 slash 命令菜单
+- 按项目隔离的会话持久化，支持恢复、重命名、分叉和压缩
+- 模型感知的上下文统计，支持 provider usage、tail estimate 和自动压缩
+- 支持通过 `SKILL.md` 发现本地 skills
+- 支持通过 stdio 或 streamable HTTP 动态加载 MCP tools
+- 支持通过通用 MCP helper tools 访问 resources 和 prompts
 - MCP 非阻塞启动，并在 UI 中显示 connecting / ready / error 状态
 - 可选 Langfuse / OpenTelemetry agent tracing
 
@@ -52,33 +106,33 @@ tcode 围绕一条实用的终端 agent 闭环构建：
 - `list_mcp_prompts`
 - `get_mcp_prompt`
 
-### 安全与可用性
+### 安全性与可用性
 
-- 文件修改前 review
-- 路径、命令和编辑权限检查
-- 支持拒绝时提供反馈
-- 支持“本轮允许该文件”和“本轮允许所有编辑”
-- 审批视图支持展开、折叠、滚动和选择
-- 后台 shell 命令会以轻量任务形式显示
-- 完成的工具调用会自动折叠为简洁摘要
-- 模型可通过 `ask_user` 主动提出澄清问题并暂停当前回合
+- 文件修改前先 review diff
+- 路径和命令权限检查
+- 独立配置目录和交互式安装器
+- 支持 Anthropic 风格接口
+- 超大工具结果会落盘保存，并在上下文里替换成短预览和文件路径，避免长命令输出挤占有效对话空间
 
 ### 最近交互改进
 
 - 审批对话支持上下键选择与 Enter 确认，也支持选项上的字母/数字快捷键
-- 支持“拒绝并给模型反馈”，可直接把修正建议发回模型
-- 编辑审批支持“本轮允许此文件”与“本轮允许全部编辑”
-- diff 预览使用标准 unified diff（更接近 `git diff`）
+- 支持"拒绝并给模型反馈"，可直接把修正建议发回模型
+- 编辑审批支持"本轮允许此文件"与"本轮允许全部编辑"
+- diff 预览改为标准 unified diff（更接近 `git diff`）
 - 审批页面支持 `Ctrl+O` 展开/收起与滚轮/分页滚动
 - 审批弹窗打开时也支持 `Ctrl+C` 干净退出
 - 工具调用结果自动折叠为摘要，减少 transcript 噪音
-- 通过 `run_command` 启动的显式后台 shell 命令，会以轻量 shell task 的形式呈现，不再卡成一个永远 running 的普通工具调用
-- TTY 输入事件串行处理，并且会把 CRLF 的 Enter 合并成一次确认，避免审批弹窗被重复触发
-- 审批输入处理避免了上下键/Enter 无响应的死锁问题
+- 通过 `run_command` 启动的显式后台 shell 命令，现在会以轻量 shell task 的形式呈现，不再卡成一个永远 running 的普通工具调用
+- TTY 输入事件现在串行处理，并且会把 CRLF 的 Enter 合并成一次确认，避免审批弹窗被重复触发
+- 修复了审批阶段可能导致上下键/Enter 无响应的输入事件死锁问题
 - 加固 ESC 序列解析，异常终端输入不会再卡住按键处理
 - `run_command` 支持 `"git status"` 这类单字符串命令输入，并自动拆分参数
 - 未知的非 shell 命令现在会请求审批，而不是直接拒绝
-- 澄清问题通过 `ask_user` 结构化发问，并在用户回复前暂停当前回合
+- 澄清问题改为通过 `ask_user` 结构化发问，并在用户回复前暂停当前回合
+- 上下文 token 记账已改为 provider usage 驱动：供应商返回的 usage 会作为 context stats、自动压缩触发、warning/blocking 级别和 TUI context badge 的主要来源；本地估算器只在 provider 未返回 usage 或最新 usage boundary 之后存在新增消息时作为 fallback/tail estimate
+- TUI context badge 会区分真实 usage 和估算 tail，例如 `ctx 82% ... usage+est`；压缩后的会话会把保留下来的旧 usage 标记为 stale，避免把压缩前的 usage 当作当前上下文真实值
+- 大工具结果会持久化到 tcode 的本地数据目录，并在模型上下文里替换为预览和文件路径；同一个结果的重复处理会复用替换内容，让 token accounting 保持稳定
 
 ## 安装
 
@@ -94,16 +148,30 @@ npm run install-cli
 - `ANTHROPIC_BASE_URL`
 - `ANTHROPIC_AUTH_TOKEN`
 
-配置文件存储在：
+配置保存在：
 
 - `~/.tcode/settings.json`
 - `~/.tcode/mcp.json`
 
-启动器安装到：
+你可以通过 `TCODE_HOME` 自定义配置目录：
+
+```bash
+export TCODE_HOME=/path/to/custom/dir
+npm run install-cli
+```
+
+启动命令安装到：
 
 - `~/.local/bin/tcode`
 
-如果 `~/.local/bin` 不在 `PATH` 中，可以添加：
+你可以通过 `TCODE_BIN_DIR` 自定义启动器目录：
+
+```bash
+export TCODE_BIN_DIR=/path/to/custom/bin
+npm run install-cli
+```
+
+如果 `~/.local/bin` 不在你的 `PATH` 中，可以添加：
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -111,13 +179,13 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ## 快速开始
 
-运行已安装的命令：
+运行安装后的命令：
 
 ```bash
 tcode
 ```
 
-开发模式运行：
+本地开发模式：
 
 ```bash
 npm start
@@ -142,7 +210,7 @@ TCODE_MODEL_MODE=mock npm start
 - `tcode skills add <path> [--name <name>] [--project]`
 - `tcode skills remove <name> [--project]`
 
-### 本地 slash commands
+### 本地 slash 命令
 
 - `/help`
 - `/tools`
@@ -155,16 +223,263 @@ TCODE_MODEL_MODE=mock npm start
 - `/permissions`
 - `/trace`
 
+### 终端交互能力
+
+- 命令提示与 slash 菜单
+- transcript 滚动
+- 输入编辑
+- 历史输入导航
+- 审批界面上下键选择与反馈输入（也支持快捷键直接选择）
+
+### 会话管理
+
+tcode 每轮对话后自动保存。每次启动会创建新的会话，分配唯一 ID。
+
+- `/resume` — 打开会话选择器
+- `/resume <id>` — 恢复指定会话
+- `/rename <name>` — 重命名当前会话
+- `/new` — 开始新会话（旧会话保留）
+- `/fork` — 将当前会话分叉为独立副本
+- `/compact` — 压缩上下文，释放 context window 空间
+
+CLI 参数：
+
+- `tcode --resume` — 启动时打开会话选择器
+- `tcode --resume <id>` — 恢复指定会话
+- `tcode --fork <id>` — 分叉指定会话并恢复
+
+会话按工作目录隔离，存储在 `~/.tcode/projects/`，采用追加写入的 JSONL 格式。退出时会打印 session ID，方便后续恢复。超过 30 天的会话会自动清理。
+
+## 长会话与上下文管理
+
+tcode 现在把长会话作为一等工作流处理：
+
+- 模型接口返回 provider usage 时，tcode 会把它记录在 assistant response boundary 上，并作为 token 记账的主数据源。
+- 如果最新 provider usage boundary 之后又追加了消息，tcode 会补充本地 tail estimate，并在 badge 中标记来源，例如 `usage+est`。
+- 如果 provider 不返回 usage，tcode 会回退到本地估算，因此离线模式和兼容网关仍然可用。
+- 上下文统计会驱动 TUI badge、warning/blocking 级别和自动压缩触发。
+- `/compact` 会手动压缩上下文，并在会话日志中写入 compact boundary。
+- 当上下文利用率过高时，自动压缩可以总结旧轮次，为后续对话腾出空间。
+- 压缩后，保留下来的压缩前 usage 会被标记为 stale，避免把旧 provider 总量误认为当前上下文大小。
+- 超大工具结果会写入 `~/.tcode/tool-results/`，并在可见上下文里替换成预览和完整输出路径。单个结果超过 `50_000` 字符会落盘；一批工具结果会被压到约 `200_000` 字符的可见预算内。
+
+会话存储和上下文压缩会一起工作：`loadSession` 会从最近的 compact boundary 之后恢复，而 `loadTranscript` 仍然可以从 JSONL 事件日志重建可见 transcript。
+
 ## 配置
 
-tcode 会读取 `~/.tcode/settings.json`、`~/.tcode/mcp.json`、项目级 `.mcp.json`、兼容的 Claude 本地配置以及进程环境变量。
+配置示例：
 
-Skills 会从以下位置发现：
+```json
+{
+  "model": "your-model-name",
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    },
+    "remote-example": {
+      "protocol": "streamable-http",
+      "url": "https://example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer your-token"
+      }
+    }
+  },
+  "trace": {
+    "enabled": false,
+    "langfuse": {
+      "enabled": false
+    }
+  },
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+    "ANTHROPIC_AUTH_TOKEN": "your-token",
+    "ANTHROPIC_MODEL": "your-model-name"
+  }
+}
+```
+
+也支持 Claude Code 风格的项目级 `.mcp.json`：
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    }
+  }
+}
+```
+
+为了兼容不同厂商的 MCP 实现，tcode 现在会自动协商 stdio framing：
+
+- 默认先尝试标准 MCP 的 `Content-Length` framing
+- 如果失败，再自动回退到按行分隔的 JSON
+- 也可以在单个 server 上通过 `"protocol": "content-length"` 或 `"protocol": "newline-json"` 强制指定
+- 远程 MCP 可使用 `"protocol": "streamable-http"`，并配置 `"url"`（可选 `"headers"`）
+- header 的值支持环境变量插值，例如 `"Authorization": "Bearer $MCP_TOKEN"`
+
+远程 MCP 认证策略（保持轻量）：
+
+- 使用 `tcode mcp login <name> --token <bearer-token>` 本地保存 bearer token
+- 使用 `tcode mcp logout <name>` 清除已保存 token
+- 当前版本有意采用 token 方案，不内置完整 OAuth 回调 + refresh 状态机
+- 这样可以保持实现简洁并符合 tcode 轻量架构目标；后续确有需要再补完整 OAuth 自动化
+
+Skills 默认会从这些位置发现：
 
 - `./.tcode/skills/<skill-name>/SKILL.md`
 - `~/.tcode/skills/<skill-name>/SKILL.md`
 - `./.claude/skills/<skill-name>/SKILL.md`
 - `~/.claude/skills/<skill-name>/SKILL.md`
+
+配置优先级：
+
+1. `~/.tcode/settings.json`
+2. `~/.tcode/mcp.json`
+3. 项目级 `.mcp.json`
+4. 兼容的本地已有配置
+5. 当前进程环境变量
+
+## Skills 与 MCP 用法
+
+tcode 现在支持两类扩展：
+
+- `skills`：本地工作流说明，一般由一个 `SKILL.md` 描述如何完成某类任务
+- `MCP`：外部工具源，启动后会把远端 server 暴露的 tools / resources / prompts 接入 tcode
+
+### Skills：安装、查看、触发
+
+安装一个本地 skill：
+
+```bash
+tcode skills add ~/minimax-skills/skills/frontend-dev --name frontend-dev
+```
+
+查看已发现的 skills：
+
+```bash
+tcode skills list
+```
+
+进入交互界面后，也可以用：
+
+```text
+/skills
+```
+
+来检查当前会话里可用的 skills。
+
+如果你明确提到 skill 名，tcode 会优先加载它。比如：
+
+```text
+请使用 frontend-dev skill，直接重构当前 landing page，不要只停在方案说明。
+```
+
+也可以更明确地要求先读 skill：
+
+```text
+先加载 fullstack-dev skill，再根据这个 skill 的工作流实现当前需求。
+```
+
+一个常见用法是把官方或兼容 Claude Code 的 skills 仓库 clone 到本地后再安装：
+
+```bash
+git clone https://github.com/MiniMax-AI/skills.git ~/minimax-skills
+tcode skills add ~/minimax-skills/skills/frontend-dev --name frontend-dev
+```
+
+### MCP：安装、查看、触发
+
+安装一个用户级 MCP server：
+
+```bash
+tcode mcp add MiniMax --env MINIMAX_API_KEY=your-key --env MINIMAX_API_HOST=https://api.minimaxi.com -- uvx minimax-coding-plan-mcp -y
+```
+
+查看当前已配置的 MCP：
+
+```bash
+tcode mcp list
+```
+
+如果你想只给当前项目配置 MCP，可以加 `--project`：
+
+```bash
+tcode mcp add filesystem --project -- npx -y @modelcontextprotocol/server-filesystem .
+tcode mcp list --project
+```
+
+进入交互界面后，可以用：
+
+```text
+/mcp
+```
+
+查看当前会话里哪些 server 已连接、用了什么协议、暴露了多少 tools / resources / prompts。
+
+MCP tools 会自动注册成：
+
+```text
+mcp__<server_name>__<tool_name>
+```
+
+例如安装 MiniMax MCP 后，你可能会看到：
+
+- `mcp__minimax__web_search`
+- `mcp__minimax__understand_image`
+
+这些工具不需要手动声明，server 连接成功后会自动出现在工具列表中。
+
+### 在对话里怎么用
+
+最简单的方式是直接自然语言描述需求，让模型自己决定是否调用 skill 或 MCP tool：
+
+```text
+搜索一下最近关于 MCP 的中文资料，给我 5 条有代表性的链接。
+```
+
+如果当前已连接 MiniMax MCP，模型通常会自动选择 `mcp__minimax__web_search`。
+
+如果你想更稳一些，可以把 skill 或目标写清楚：
+
+```text
+请使用 frontend-dev skill，直接修改当前项目文件，把页面重做成更完整的产品落地页。
+```
+
+或者：
+
+```text
+请使用已连接的 MCP 工具帮我搜索 MiniMax MCP guide，并总结它提供了哪些能力。
+```
+
+### 什么时候用 skills，什么时候用 MCP
+
+- `skills` 更适合沉淀工作流、规范、领域经验
+- `MCP` 更适合接入搜索、图片理解、外部系统、数据库、浏览器、文件系统等远端能力
+
+一个常见组合是：
+
+- 用 `frontend-dev` 这类 skill 约束页面改造方式
+- 再让已连接的 MCP 提供搜索、图片理解或其他外部能力
+
+### 兼容性说明
+
+tcode 当前主要支持：
+
+- 本地 `SKILL.md` 发现与 `load_skill`
+- stdio MCP server
+- streamable HTTP MCP endpoint
+- MCP tools
+- MCP resources / prompts 的通用 helper tools
+
+为了兼容不同厂商实现，tcode 会自动尝试：
+
+- 标准 `Content-Length` framing
+- 失败后回退到 `newline-json`
+
+所以像 MiniMax 这类采用按行 JSON 的 MCP server，也可以直接接入。
 
 ## Tracing
 
@@ -192,24 +507,62 @@ TCODE_TRACE=1 npm start
 
 在交互界面中运行 `/trace` 可以查看当前 tracing 状态。
 
+## 通过 tcode 学习 Claude Code 设计
+
+如果你想把这个项目当成学习材料，可以继续阅读：
+
+- [通过 tcode 你可以学习到 Claude Code 的哪些设计](./CLAUDE_CODE_PATTERNS_ZH.md)
+
 ## 项目结构
 
 - `src/index.ts`: CLI 入口
-- `src/agent-loop.ts`: 多步模型和工具循环
-- `src/tool.ts`: 工具注册和执行
-- `src/skills.ts`: 本地 skill 发现和加载
-- `src/mcp.ts`: stdio / streamable HTTP MCP client 和动态工具封装
-- `src/manage-cli.ts`: `tcode mcp` / `tcode skills` 管理命令
-- `src/tools/*`: 内置工具
+- `src/agent-loop.ts`: 多步模型/工具循环
+- `src/tool.ts`: 工具注册与执行
+- `src/skills.ts`: 本地 skill 发现与加载
+- `src/mcp.ts`: stdio / streamable HTTP MCP 客户端与动态工具封装
+- `src/manage-cli.ts`: 顶层 `tcode mcp` / `tcode skills` 管理命令
+- `src/session.ts`: 追加写入的会话 JSONL、恢复/分叉/重命名、compact boundary 和过期清理
+- `src/compact/*`: 手动压缩、自动压缩和对话摘要辅助逻辑
+- `src/utils/token-estimator.ts`: provider usage 优先的上下文记账与本地估算 fallback
+- `src/utils/tool-result-storage.ts`: 大工具输出持久化与预览替换
+- `src/tools/*`: 内置工具集合
 - `src/tui/*`: 终端 UI 模块
 - `src/tracing.ts`: agent loop tracing 和可选 Langfuse 导出
 - `src/config.ts`: 运行时配置加载
 - `src/install.ts`: 交互式安装器
 
-## 更多文档
+## 代码规模
+
+当前核心实现约 **8,500 行**。
+
+统计口径：
+
+- 纳入：核心 TypeScript 源码、内置工具、配置、MCP、会话、压缩、adapter、permissions、tracing，以及 `bin/tcode`
+- 排除：文档、测试、`node_modules/` 和 TUI 文件（`src/tui/`、`src/tty-app.ts`）
+
+如果只排除 `src/tui/`，但保留 `src/tty-app.ts`，总计约 **10,500 行**。
+
+## 架构文档
 
 - [Architecture Overview](./ARCHITECTURE.md)
 - [中文架构说明](./ARCHITECTURE_ZH.md)
-- [贡献指南](./CONTRIBUTING_ZH.md)
-- [路线图](./ROADMAP_ZH.md)
-- [通过 tcode 学习 Claude Code 设计](./CLAUDE_CODE_PATTERNS_ZH.md)
+- [技术说明](./TECHNICAL_OVERVIEW_ZH.md)
+- [MCP 功能技术说明](./MCP_TECHNICAL_ZH.md)
+
+## 贡献规范
+
+- [中文贡献规范](./CONTRIBUTING_ZH.md)
+- [Contribution Guidelines](./CONTRIBUTING.md)
+
+## 路线图
+
+- [路线图（中文）](./ROADMAP_ZH.md)
+- [Roadmap](./ROADMAP.md)
+
+## 开发说明
+
+```bash
+npx tsc --noEmit
+```
+
+tcode 有意保持小而实用。目标是让整体架构足够清晰、易改造、易扩展。

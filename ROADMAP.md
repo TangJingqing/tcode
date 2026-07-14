@@ -1,56 +1,61 @@
 # tcode Roadmap
 
-tcode already has a usable lightweight terminal coding workflow. The roadmap below focuses on the most valuable missing capabilities while preserving the project's small, readable shape.
+tcode already has a usable lightweight terminal coding workflow, but there is still a visible gap between the current `main` branch and a more complete Claude Code-like runtime.
+
+This roadmap highlights the most valuable missing capabilities and the order in which they should ideally be improved.
+
+Pull requests are welcome, especially when they align with the contribution guidelines and keep the project lightweight.
 
 ## P0
 
-### 1. Model-Aware Context Management
+### 1. Model-aware context management
 
-Long sessions need better context control.
+**Status: mostly implemented; follow-up polish remains.**
 
-This includes:
+This is the most important missing runtime capability.
+
+It includes:
 
 - model-aware context window configuration
-- provider-reported usage accounting
-- context usage display in the TUI
-- automatic compaction for long conversations
+- provider-reported usage accounting as the primary token source
+- context usage display in the TUI, including whether the value is provider usage, usage plus estimated tail, or estimate-only fallback
+- automatic context compaction for long conversations, triggered from structured accounting totals instead of a bare local estimate
+- large tool-result replacement, where oversized outputs are persisted to disk and only a preview/path remains in the model-visible context
 
-### 2. API Retry and Backoff
+tcode now records provider usage on assistant response boundaries and computes context stats from a structured accounting result. The local estimator remains available for providers that do not return usage, offline tests, and tail messages appended after the latest provider usage boundary. Compaction marks retained pre-compact usage stale so the next context calculation does not treat an old response's usage as the current conversation total. Oversized tool outputs are written to the local tcode data directory and replaced with stable preview messages, so long command output no longer dominates context accounting.
 
-Transient provider failures should not leak directly into the user workflow.
+This work matters because long-session stability depends on it. It is also one of the most important design areas where tcode still trails a more complete Claude Code-style runtime.
 
-This includes:
+### 2. API retry and backoff
 
-- retry on 429 and 5xx responses
-- exponential backoff
-- support for `Retry-After` when available
+**Status: implemented.** The main Anthropic adapter retries on 429 and 5xx with exponential backoff and honors `Retry-After` when present.
 
-### 3. Session Persistence and Resume
+Possible follow-ups include a more uniform configurable retry policy, richer observability, or applying the same policy consistently across additional provider code paths.
 
-tcode should be able to save and resume sessions reliably.
+### 3. Session persistence and resume
 
-This includes:
+**Status: implemented.** Sessions are saved per working directory in `~/.tcode/projects/` using append-only JSONL with parentUuid tree structure. Includes `/resume`, `/rename`, `/new`, `/fork`, `/compact` commands, interactive session picker with delete support, `--resume`/`--fork` CLI flags, and automatic 30-day expiry cleanup.
 
-- autosave
-- manual resume
-- basic session recovery
+### 4. Agent tracing and observability
+
+**Status: implemented.** Optional tracing layer records agent turns, model inputs/outputs, tool events, loop decisions, and errors. Supports Langfuse / OpenTelemetry export. Configurable via `TCODE_TRACE=1` or `~/.tcode/settings.json`.
 
 ## P1
 
-### 4. Layered Memory Loading
+### 5. Layered memory loading
 
-tcode can support a lightweight project memory hierarchy similar in spirit to Claude Code.
+tcode should support a lightweight memory hierarchy similar in spirit to Claude Code's layered project context.
 
-Possible layers:
+This may include:
 
 - global memory
 - project memory
-- nested or local memory
-- simple include support
+- nested/project-local memory
+- simple include support where appropriate
 
-### 5. Stronger Provider Abstraction
+### 6. Stronger provider abstraction
 
-tcode currently works with Anthropic-style APIs and compatible providers. The provider layer can become more explicit.
+tcode currently works well with Anthropic-style APIs and some compatible providers, but the provider model can be made more explicit and complete.
 
 Target direction:
 
@@ -59,36 +64,49 @@ Target direction:
 - OpenRouter
 - LiteLLM-style gateways
 
-### 6. Lightweight Task Tracking
+### 7. Todo or task tracking support
 
-A small built-in task tracker would improve long multi-step execution without turning the runtime into a heavyweight planning system.
+A lightweight built-in task tracker would improve long multi-step execution.
 
-### 7. Sub-Agent Support
+This should stay simple and should not become a heavyweight planning subsystem.
 
-Sub-agents would be useful for parallel investigation and review, but should come after context, session, and provider behavior are more stable.
+### 8. `.claude/agents` and sub-agent support
 
-### 8. Expand the Core Toolset Selectively
+This is an important capability, but it also adds complexity.
 
-tcode should add tools that support core runtime capabilities, not chase tool-count parity.
+It is worth doing after the core runtime is more stable.
 
-Priority areas:
+### 9. Expand the core toolset selectively
 
-- session and memory tools
-- context management helpers
+tcode does not need to chase Claude Code's full tool count mechanically, but it does need to expand beyond the current minimal set over time.
+
+The direction here should be:
+
+- add tools that support core runtime capabilities
+- prefer Claude Code-aligned tool patterns over unrelated inventions
+- keep the built-in set small and high-value
+- continue to rely on MCP for many external or optional capabilities
+
+Priority should go to missing core tool categories such as:
+
+- session and memory related capabilities
+- context management related capabilities
 - lightweight task tracking
-- high-value built-in tools where MCP is not a sufficient substitute
+- a few high-value built-in tools where MCP is not a sufficient substitute
+
+The goal is not tool-count parity. The goal is a stronger core toolset while preserving tcode's lightweight identity.
 
 ## P2
 
-### 9. Notebook Editing Support
+### 10. Notebook editing support
 
-Useful for data and research workflows, but not essential for the main terminal coding loop.
+Useful, but not essential for the main terminal coding workflow.
 
-### 10. Built-In Web Tools
+### 11. Built-in web tools
 
-MCP can already provide web search and fetch capabilities, so built-in web tools are useful but lower priority.
+tcode can already extend itself through MCP, so built-in `WebFetch` / `WebSearch` are useful but not the most urgent gap.
 
-### 11. Evaluation Infrastructure
+### 12. Evaluation and trace infrastructure
 
 This includes:
 
@@ -96,18 +114,20 @@ This includes:
 - structured trace capture
 - reproducible agent evaluation
 
-### 12. Prompt Caching
+This is valuable for research and comparison, but it is not on the critical path for the main product loop.
 
-Worth exploring once context accounting and provider integration are more mature.
+### 13. Prompt caching
+
+Worth exploring later, especially once context accounting and provider integration are more mature.
 
 ## Contribution Notes
 
-When contributing to roadmap items:
+If you want to contribute in these areas:
 
-- keep PRs focused
-- preserve the lightweight architecture
-- document user-facing behavior
-- explain validation steps
+- prefer focused PRs
+- keep the implementation lightweight
+- align the design with Claude Code's direction where possible
+- explain how the change was validated
 
 See:
 

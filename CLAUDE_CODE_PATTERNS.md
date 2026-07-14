@@ -1,87 +1,212 @@
 # What Claude Code Design Ideas You Can Learn Through tcode
 
-tcode is not a clone of Claude Code, but it makes several Claude Code-style design ideas visible in a small TypeScript codebase.
-
 ## 1. Agent Loop
+
+### Claude Code design
 
 Claude Code is centered on an agent loop:
 
 - receive user input
 - assemble context
 - call the model
-- execute tools when requested
-- feed tool results back into the model
+- decide whether tools are needed
+- execute tools
+- feed results back into the model
 - stop only when the current turn can actually end
 
-tcode follows the same direction in `src/agent-loop.ts`. The loop is small enough to read directly, while still handling progress messages, tool calls, clarifying questions, retries, and tracing.
+### What tcode makes visible
+
+tcode follows the same direction. The project is organized around a multi-step turn loop. The UI, tool layer, permissions, MCP, and skills are all shaped around that execution flow.
 
 ## 2. Structured Message Model
 
-Claude Code does not treat the session as plain chat text. It distinguishes between user input, assistant output, progress, tool calls, and tool results.
+### Claude Code design
 
-tcode uses the same idea in `src/types.ts`:
+Claude Code does not treat the session as plain chat text. It distinguishes between different types of state in the conversation, such as:
 
-- `user`
-- `assistant`
-- `assistant_progress`
-- `assistant_tool_call`
-- `tool_result`
+- user input
+- final assistant output
+- intermediate progress
+- tool calls
+- tool results
+- compaction boundaries or summaries
 
-This keeps the runtime from confusing progress updates with final answers.
+### What tcode makes visible
+
+tcode also moved away from a plain transcript model. It now distinguishes between normal assistant output, progress, tool calls, tool results, and compacted context summaries.
 
 ## 3. Tool Use as a Protocol
 
-Tool use is a protocol, not a direct function call from model text.
+### Claude Code design
 
-tcode makes that protocol explicit:
+In Claude Code, tool use is a protocol:
 
-- tools are registered in one registry
-- inputs are described for the model
-- inputs are validated locally with Zod
-- permissions can participate before local side effects
-- results return through one normalized shape
+- the model declares tool intent
+- the system validates tool input
+- permissions participate in the decision
+- tool execution returns normalized results
+- results are fed back into the next reasoning step
 
-Local tools and MCP-backed tools share this execution path.
+### What tcode makes visible
 
-## 4. Clarification as a Tool
+tcode uses the same structure. Tools are registered through one system, validated through schemas, executed through one entry point, and returned in a consistent format. Local tools and MCP-backed tools are both brought into the same execution model.
 
-Real coding agents sometimes need user input before continuing. tcode exposes this as `ask_user`, a normal tool that returns `awaitUser`.
+## 4. Progress and Final Are Different States
 
-That keeps clarification inside the same execution model as other tools instead of relying on ambiguous assistant text.
+### Claude Code design
 
-## 5. Permissions Belong Inside Execution
+Claude Code separates "still working" from "finished." A process update is not treated as a final answer just because it is natural-language text.
 
-Risky operations such as writing files, accessing paths outside the workspace, or running dangerous commands should pass through a permission boundary.
+### What tcode makes visible
 
-tcode keeps this logic in `src/permissions.ts` and routes tools through it. Approvals are part of the runtime, not only a UI feature.
+tcode follows the same distinction. Intermediate execution text is treated as progress, rendered separately, and handled differently from final assistant output.
 
-## 6. MCP as Dynamic Capability Injection
+## 5. Clarification as a Tool
 
-MCP lets external servers expose tools, resources, and prompts at runtime.
+### Claude Code design
 
-tcode discovers MCP-backed tools in `src/mcp.ts`, then registers them alongside built-in tools. The agent loop does not need to know whether a tool is local or remote.
+Real coding agents sometimes need user input before continuing. Rather than relying on ambiguous assistant text that the loop might misinterpret, Claude Code exposes clarification as a structured interaction that pauses the turn.
 
-## 7. Skills as Local Workflow Memory
+### What tcode makes visible
 
-Skills are reusable workflow instructions stored in `SKILL.md` files.
+tcode exposes this as `ask_user`, a normal tool that returns `awaitUser`. That keeps clarification inside the same execution model as other tools instead of relying on ambiguous assistant text.
 
-tcode discovers skills from `.tcode/skills` and compatible `.claude/skills` locations, then exposes them to the model and provides a `load_skill` tool for full content loading.
+## 6. Permissions Belong Inside the Execution Path
 
-## 8. Tracing for Agent Behavior
+### Claude Code design
 
-Agent behavior is much easier to debug when each loop decision is observable.
+Claude Code treats permissions as part of the execution model itself. Risky operations such as command execution or file modification sit behind approval and review boundaries that are part of the system's normal control flow.
 
-tcode has optional tracing in `src/tracing.ts`, including model inputs, tool events, loop decisions, errors, and optional Langfuse export.
+### What tcode makes visible
 
-## 9. Small Architecture as a Learning Tool
+tcode follows the same architectural choice. Command approval, review before writes, per-turn permission memory, and rejection feedback are all inside the turn loop.
 
-The main value of tcode is that the design is visible:
+## 7. MCP as Dynamic Capability Injection
 
-- the loop is in one file
-- tools use one protocol
-- permissions are centralized
-- TUI state is explicit
-- MCP and skills plug into the same runtime
-- tracing records the decisions without owning the behavior
+### Claude Code design
 
-That makes tcode useful both as a local assistant and as a study project for terminal coding-agent architecture.
+The important idea behind MCP is that external servers can dynamically expose capabilities into the current agent session.
+
+### What tcode makes visible
+
+tcode takes the same approach. It reads MCP configuration, connects to external servers, discovers remote tools, and mounts them into the local tool surface. Resources and prompts are also exposed through a shared helper layer. Non-blocking MCP startup with connecting / ready / error status keeps the UI responsive.
+
+## 8. Skills as Lightweight Workflow Extension
+
+### Claude Code design
+
+Claude Code skills act more like lightweight workflow extensions:
+
+- task-specific instructions
+- domain-specific execution constraints
+- reusable working patterns that can be loaded when needed
+
+### What tcode makes visible
+
+tcode applies the same idea in a smaller form. Local `SKILL.md` files can be discovered and loaded into the execution flow, allowing the model to adopt a more specific workflow.
+
+## 9. Automatic Context Compaction
+
+### Claude Code design
+
+Claude Code does not treat long-context management as simple deletion. Older context is compressed into a form that still supports continued work, while newer context remains available in higher fidelity. Context decisions also need to be tied to the real model budget instead of a vague sense that the conversation "feels long."
+
+### What tcode makes visible
+
+tcode follows the same direction. When conversation state becomes too large, earlier messages can be summarized into a `context_summary`, and the recent tail is preserved. Auto-compact is driven by structured context stats rather than a blind message count. A three-level system (microcompact → autoCompact → manual /compact) provides graduated responses to growing context.
+
+## 10. Provider Usage as Context Truth
+
+### Claude Code design
+
+A production coding agent should not rely only on local token guesses when the provider can return usage metadata. Provider usage is the closest available truth for current context size, while local estimation is still useful as a fallback or for messages added after the latest provider boundary.
+
+### What tcode makes visible
+
+tcode records provider usage on assistant response boundaries and uses it as the primary source for context accounting. If new messages are appended after that boundary, tcode adds an estimated tail and marks the source accordingly, for example `usage+est`. If usage becomes stale after compaction, it is explicitly marked stale so old provider totals are not reused as current context truth.
+
+This makes the TUI context badge, warning levels, blocking levels, and auto-compact trigger all depend on the same accounting result.
+
+## 11. Session Events, Resume, and Forking
+
+### Claude Code design
+
+Long-running coding agents need more than an in-memory chat buffer. They need a durable session model that can survive process exits, support resuming work, and preserve enough structure to understand how the conversation evolved.
+
+### What tcode makes visible
+
+tcode stores sessions per working directory as append-only JSONL events. Each event has metadata such as session ID, timestamp, cwd, and parent linkage. The runtime can resume a session, rename it, start a fresh one, fork an existing session into an independent branch, and clean up expired sessions.
+
+Compact boundaries are also stored as events. When a session is resumed, tcode can load from the latest compact boundary while still keeping the full transcript reconstructable from the event log.
+
+## 12. Large Tool Results Should Leave the Prompt
+
+### Claude Code design
+
+Tool results can be much larger than the useful signal they contain. A coding agent has to protect the model context from being dominated by huge command output, generated files, logs, or search results. The important design idea is to separate "available to the system" from "fully inserted into the prompt."
+
+### What tcode makes visible
+
+tcode persists oversized tool results under its local data directory and replaces the model-visible content with a short preview plus the full-output file path. Single huge results and oversized batches are reduced before they enter the next model step.
+
+That keeps the full data available for inspection while preventing tool output from crowding out the conversation, recent edits, and task intent.
+
+## 13. TUI as a State-Machine View
+
+### Claude Code design
+
+Claude Code's terminal UI acts as a visualization of internal system state:
+
+- tool running vs success vs failure
+- progress vs final response
+- approval pending vs normal execution
+- compacted or summarized output where appropriate
+
+### What tcode makes visible
+
+tcode's TUI follows the same direction. It renders running tool states, progress messages, approval states, and collapsed tool summaries. The card-style layout (header, session feed, prompt, approval, activity, footer) maps directly to runtime state categories.
+
+## 14. Foreground Tool Execution and Background Shell Tasks Are Different
+
+### Claude Code design
+
+Claude Code does not treat every command as the same kind of synchronous tool call. Long-running shell commands that can outlive the current turn are modeled as separate tasks rather than being left hanging as ordinary unfinished tool executions.
+
+### What tcode makes visible
+
+tcode now follows that direction in a lightweight form. Explicitly backgrounded shell commands are no longer treated as ordinary synchronous `run_command` executions. They are registered as minimal background shell tasks and surfaced separately in the TUI. This is not a full clone of Claude Code's task system, but it does preserve the design idea that foreground tool execution and background shell tasks should be modeled differently.
+
+## 15. Tracing for Agent Behavior
+
+### Claude Code design
+
+Agent behavior is much easier to debug when each loop decision is observable. A production coding agent benefits from structured observability — model inputs, tool events, loop decisions, and errors — without that observability changing the behavior itself.
+
+### What tcode makes visible
+
+tcode has optional tracing in `src/tracing.ts`, including model inputs, tool events, loop decisions, errors, and optional Langfuse / OpenTelemetry export. Tracing is designed to explain agent behavior without changing it.
+
+## 16. Boundary Between Borrowing and Simplification
+
+### Claude Code design
+
+Claude Code is a full product-scale system. Many of its design choices sit on top of larger state management, context handling, and interaction layers.
+
+### What tcode makes visible
+
+tcode keeps the structural ideas rather than the full production footprint. What it keeps are the parts that shape the system most strongly:
+
+- loop-first architecture
+- structured message handling
+- unified tool protocol
+- permission-aware execution
+- MCP as dynamic extension
+- skills as workflow extension
+- usage-aware context accounting and automatic compaction
+- durable sessions, resume, and fork
+- large tool-result storage outside the prompt
+- state-oriented terminal UI
+- a distinction between foreground tool execution and background shell tasks
+- optional tracing for agent observability
+
+tcode is better understood as a small Claude Code-style reference implementation rather than as a full clone.

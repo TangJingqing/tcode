@@ -1,87 +1,165 @@
 # Contributing to tcode
 
-Thanks for helping improve tcode. The project is intentionally small, so contributions should keep the runtime readable and easy to modify.
+Thanks for contributing to tcode.
 
-## Principles
+tcode welcomes pull requests, but the project has a clear scope: it is meant to stay small, readable, and close in spirit to Claude Code's core design direction.
 
-- Prefer focused changes over broad rewrites.
-- Keep the agent loop and tool model easy to inspect.
-- Use existing patterns before adding new abstractions.
-- Preserve review-before-write and permission boundaries.
-- Add documentation when behavior or workflows change.
-- Validate changes with `npx tsc --noEmit` when possible.
+This document explains the baseline expectations for contributions.
 
-## Development Setup
+## Core Principles
 
-```bash
-npm install
-npm start
-```
+### 1. Keep the project lightweight
 
-Run the TypeScript checker:
+Please avoid introducing overly complex design changes.
 
-```bash
-npx tsc --noEmit
-```
+tcode is intentionally small. New contributions should preserve:
 
-Run in mock mode:
+- a compact codebase
+- direct control flow
+- low conceptual overhead
+- easy traceability from user action to model loop, tool call, and UI update
 
-```bash
-TCODE_MODEL_MODE=mock npm start
-```
+Changes that add large abstractions, deep indirection, or framework-heavy rewrites are usually not a good fit unless they are clearly necessary.
 
-## Pull Request Guidelines
+### 2. Stay aligned with Claude Code's design direction
 
-Good PRs usually include:
+Because of the nature of this project, new features should remain close to Claude Code's source-level design direction wherever possible.
 
-- a short description of the user-visible behavior
-- a focused explanation of why the change is needed
-- notes about permissions, file writes, or command execution if affected
-- validation steps, including type checks or manual TUI checks
-- documentation updates for new commands, tools, or settings
+That does not mean copying everything mechanically. It means:
 
-Avoid bundling unrelated refactors with feature work.
+- prefer similar architectural ideas over unrelated inventions
+- preserve the same mental model when adapting a feature
+- avoid introducing product behavior that clearly diverges from the Claude Code style without a strong reason
 
-## Areas That Need Care
+tcode is a lightweight adaptation, not an unrelated terminal agent project.
 
-### Agent Loop
+## Contribution Expectations
 
-Changes to `src/agent-loop.ts` affect turn completion, tool execution, retries, and tracing. Keep behavior explicit and add comments only where the control flow would otherwise be hard to follow.
+### 3. Prefer small, incremental changes
 
-### Tools
+PRs should be easy to review.
 
-New tools should:
+Please prefer:
 
-- have a stable name
-- validate input with Zod
-- return a normalized `ToolResult`
-- participate in permission checks when they read, write, or execute local state
-- be registered in `src/tools/index.ts`
-- be documented in `README.md` and `README.zh-CN.md`
+- focused changes over broad refactors
+- one feature or one fix per PR
+- changes that can be explained clearly in a short PR description
 
-### Permissions
+If a feature is large, split it into smaller steps whenever possible.
 
-Do not bypass `PermissionManager` for filesystem writes, external path reads, or dangerous commands. If a new capability can affect local state, route it through the existing approval model.
+### 4. Preserve existing interaction patterns
 
-### TUI
+When changing the CLI, TUI, tool loop, permissions, MCP handling, or skills behavior:
 
-The TUI uses native stdin/stdout and ANSI rendering. Keep rendering functions deterministic and avoid mixing long-running work directly into rendering code.
+- preserve the current user-facing rhythm unless there is a strong reason to change it
+- avoid breaking existing commands and workflows
+- avoid introducing surprising behavior changes without documenting them
 
-### Tracing
+### 5. Keep safety boundaries intact
 
-Tracing should help explain agent behavior without changing it. Keep trace payloads useful but compact, and avoid recording secrets.
+tcode includes important safety boundaries around:
 
-## Documentation
+- file modification review
+- path access
+- command execution
+- approval flow
 
-When adding features, update the most relevant docs:
+New contributions should not weaken these boundaries casually.
+
+If a change affects safety behavior, explain it clearly in the PR.
+
+### 6. Prefer explicitness over cleverness
+
+This project is also meant to be studied.
+
+Please prefer:
+
+- readable code over clever compactness
+- explicit data flow over hidden magic
+- simple utilities over premature abstraction
+
+If a design is harder to understand, it should also bring clear value.
+
+### 7. Keep dependencies minimal
+
+Avoid adding new dependencies unless they materially improve the project.
+
+Before adding one, ask:
+
+- can this be done with existing code?
+- does the dependency fit the lightweight nature of the project?
+- will it make the codebase harder to maintain or understand?
+
+### 8. Update docs when behavior changes
+
+If a PR changes user-facing behavior, please update the relevant documentation.
+
+This may include:
 
 - `README.md`
 - `README.zh-CN.md`
-- `ARCHITECTURE.md`
-- `ARCHITECTURE_ZH.md`
-- `ROADMAP.md`
-- `ROADMAP_ZH.md`
+- architecture docs
+- new command or configuration examples
 
-## License
+### 9. Verify before opening a PR
 
-By contributing, you agree that your contributions are provided under the repository license.
+Before opening a PR, please make sure:
+
+- the code builds cleanly
+- the relevant behavior has been tested
+- `npx tsc --noEmit` passes
+
+If something is intentionally incomplete or unverified, mention it explicitly in the PR description.
+
+### 10. Check issues before starting a feature
+
+For new features, please check the repository issues first.
+
+This helps avoid duplicated work and keeps implementation aligned with the current roadmap.
+
+The preferred flow is:
+
+- check whether an issue already exists
+- check whether someone has already claimed the work
+- for medium or large features, open an issue first if none exists
+- link the PR to the relevant issue whenever possible
+
+Small fixes and minor documentation changes can still go directly to PR when appropriate.
+
+## What Fits Well
+
+Contributions are especially welcome in areas such as:
+
+- interaction polish
+- tool loop robustness
+- permission and review flow improvements
+- MCP compatibility
+- skills support
+- Claude Code-aligned architectural refinements
+- tracing and observability enhancements
+- session and context management improvements
+- documentation clarity
+
+## What Usually Does Not Fit
+
+These kinds of changes usually need a stronger justification:
+
+- large rewrites that increase architecture complexity significantly
+- features that move tcode away from Claude Code's design direction
+- new layers of abstraction with little practical payoff
+- heavy dependency additions for relatively small gains
+- behavior changes that make the project harder to study or modify
+
+## PR Notes
+
+A good PR description should briefly explain:
+
+- what changed
+- why it is needed
+- which issue it is related to, if applicable
+- how it stays lightweight
+- how it aligns with Claude Code's design direction
+- how it was verified
+- how reviewers can reproduce and verify the change locally
+
+Thanks again for helping improve tcode while keeping the project focused.
