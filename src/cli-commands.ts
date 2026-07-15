@@ -8,6 +8,7 @@ import {
 } from './config.js'
 import type { ToolRegistry } from './tool.js'
 import type { TraceStatus } from './tracing.js'
+import { initializeRepo, renderInitReport } from './init.js'
 
 export type SlashCommand = {
   name: string
@@ -70,6 +71,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     name: '/compact',
     usage: '/compact',
     description: 'Compress conversation context to free up context window space.',
+  },
+  {
+    name: '/init',
+    usage: '/init',
+    description: 'Create .tcode/, .gitignore entries, and MINI.md in the current project (idempotent).',
   },
   {
     name: '/resume',
@@ -239,6 +245,11 @@ export async function tryHandleLocalCommand(
         : 'trace: unavailable',
       runtime.sourceSummary,
     ].join('\n')
+  }
+
+  if (input === '/init') {
+    const report = await initializeRepo(process.cwd())
+    return renderInitReport(report)
   }
 
   if (input === '/model') {
