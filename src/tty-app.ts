@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import process from 'node:process'
+import { spawn } from 'node:child_process'
 import { listBackgroundTasks } from './background-tasks.js'
 import { runAgentTurn } from './agent-loop.js'
 import {
@@ -47,7 +48,11 @@ import {
   renderTranscript,
   getTranscriptMaxScrollOffset,
   showCursor,
+  extractSelectedText,
+  renderTranscriptLines,
+  getTranscriptWindowSize,
   type TranscriptEntry,
+  type TranscriptSelection,
 } from './ui.js'
 import type { RuntimeConfig } from './config.js'
 import type { ToolRegistry } from './tool.js'
@@ -113,6 +118,10 @@ type ScreenState = {
   isBusy: boolean
   contextStats: ContextStats | null
   compressionStatus: string | null
+  selection: TranscriptSelection | null
+  mouseDown: { x: number; y: number } | null
+  transcriptBodyStartY: number
+  transcriptBodyLines: number
 }
 
 type TranscriptEntryDraft =
@@ -187,11 +196,68 @@ function getTranscriptBodyLines(args: TtyAppArgs, state: ScreenState): number {
   return Math.max(6, remaining)
 }
 
+export function keepSelectionAfterMouseRelease(
+  selection: TranscriptSelection | null,
+): TranscriptSelection | null {
+  return selection
+}
+
 function getMaxTranscriptScrollOffset(args: TtyAppArgs, state: ScreenState): number {
   return getTranscriptMaxScrollOffset(
     state.transcript,
     getTranscriptBodyLines(args, state),
   )
+}
+
+function screenToAbsoluteLineIndex(
+  _args: TtyAppArgs,
+  state: ScreenState,
+  screenY: number,
+): number {
+  const bodyStartY = state.transcriptBodyStartY
+  const bodyY = screenY - bodyStartY
+  if (bodyY < 0) return -1
+
+  const lines = renderTranscriptLines(state.transcript)
+  const pageSize = getTranscriptWindowSize(state.transcriptBodyLines)
+  const maxOffset = Math.max(0, lines.length - pageSize)
+  const offset = Math.max(0, Math.min(state.transcriptScrollOffset, maxOffset))
+  const end = lines.length - offset
+  const start = Math.max(0, end - pageSize)
+
+  const lineIndex = start + bodyY
+  if (lineIndex < 0) return -1
+  if (lines.length === 0) return -1
+  return Math.min(lineIndex, lines.length - 1)
+}
+
+export function encodeClipboardTextForPlatform(
+  platform: NodeJS.Platform,
+  text: string,
+): string | Buffer {
+  if (platform === 'win32') {
+    return Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')])
+  }
+  return text
+}
+
+function copyToClipboard(text: string): void {
+  try {
+    const platform = process.platform
+    const proc =
+      platform === 'win32'
+        ? spawn('clip', { stdio: ['pipe', 'inherit', 'inherit'] })
+        : platform === 'darwin'
+          ? spawn('pbcopy', { stdio: ['pipe', 'inherit', 'inherit'] })
+          : spawn('xclip', ['-selection', 'clipboard'], {
+              stdio: ['pipe', 'inherit', 'inherit'],
+            })
+    const payload = encodeClipboardTextForPlatform(platform, text)
+    proc.stdin?.write(payload)
+    proc.stdin?.end()
+  } catch {
+    // Silently fail if clipboard is unavailable
+  }
 }
 
 function scrollTranscriptBy(
@@ -514,8 +580,11 @@ function extractPathFromToolInput(input: unknown): string | null {
 function renderScreen(args: TtyAppArgs, state: ScreenState): void {
   const backgroundTasks = listBackgroundTasks()
   clearScreen()
-  console.log(renderHeaderPanel(args, state))
+  const headerPanel = renderHeaderPanel(args, state)
+  console.log(headerPanel)
   console.log('')
+  state.transcriptBodyStartY = headerPanel.split('\n').length + 4
+  state.transcriptBodyLines = getTranscriptBodyLines(args, state)
 
   if (state.sessionPicker) {
     if (state.sessionPicker.allProjects) {
@@ -594,6 +663,7 @@ function renderScreen(args: TtyAppArgs, state: ScreenState): void {
             state.transcript,
             state.transcriptScrollOffset,
             getTranscriptBodyLines(args, state),
+            state.selection ?? undefined,
           )
         : `${renderStatusLine(null)}\n\nType /help for commands.`,
       {
@@ -1232,6 +1302,10 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
     isBusy: false,
     contextStats: null,
     compressionStatus: null,
+    selection: null,
+    mouseDown: null,
+    transcriptBodyStartY: 0,
+    transcriptBodyLines: 20,
   }
   state.historyIndex = state.history.length
 
@@ -1613,6 +1687,66 @@ export async function runTtyApp(args: TtyAppArgs): Promise<void> {
           ) {
             renderScreen(permissionArgs, state)
           }
+          return
+        }
+
+        if (event.kind === 'mouse') {
+          const screenX = event.x + 1
+          const screenY = event.y + 1
+          const lineIndex = screenToAbsoluteLineIndex(permissionArgs, state, screenY)
+          if (lineIndex < 0) {
+            state.mouseDown = null
+            state.selection = null
+            return
+          }
+          const col = Math.max(0, screenX - 3)  // panel border (2) + content starts after left padding space
+
+          if (event.action === 'press' && event.button === 'left') {
+            state.mouseDown = { x: col, y: lineIndex }
+            state.selection = null
+            renderScreen(permissionArgs, state)
+            return
+          }
+
+          if (event.action === 'drag' && event.button === 'left' && state.mouseDown) {
+            const startLine = Math.min(state.mouseDown.y, lineIndex)
+            const endLine = Math.max(state.mouseDown.y, lineIndex)
+            const startCol =
+              startLine === state.mouseDown.y
+                ? Math.min(state.mouseDown.x, col)
+                : state.mouseDown.y < lineIndex
+                  ? state.mouseDown.x
+                  : col
+            const endCol =
+              endLine === state.mouseDown.y
+                ? Math.max(state.mouseDown.x, col)
+                : state.mouseDown.y > lineIndex
+                  ? state.mouseDown.x
+                  : col
+
+            state.selection = {
+              startLine,
+              startCol,
+              endLine,
+              endCol,
+            }
+            renderScreen(permissionArgs, state)
+            return
+          }
+
+          if (event.action === 'release' && state.mouseDown) {
+            if (state.selection) {
+              const text = extractSelectedText(state.transcript, state.selection)
+              if (text) {
+                copyToClipboard(text)
+              }
+            }
+            state.mouseDown = null
+            state.selection = keepSelectionAfterMouseRelease(state.selection)
+            renderScreen(permissionArgs, state)
+            return
+          }
+
           return
         }
 
