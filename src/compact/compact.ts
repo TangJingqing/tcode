@@ -111,6 +111,9 @@ function messagesToText(messages: ChatMessage[]): string {
       case 'context_summary':
         parts.push(`[Previous Summary]: ${msg.content}`)
         break
+      case 'snip_boundary':
+        parts.push(`[Snipped Context Boundary]: ${msg.content}`)
+        break
       default:
         break
     }

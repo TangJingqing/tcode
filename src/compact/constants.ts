@@ -4,6 +4,12 @@ export const THRESHOLDS = {
   BLOCKED_UTILIZATION: 0.95,
 } as const
 
+export const SNIP_COMPACT_THRESHOLD = 0.70
+export const SNIP_TARGET_USAGE = 0.60
+export const SNIP_MIN_MESSAGES_TO_REMOVE = 6
+export const SNIP_KEEP_RECENT_MESSAGES = 12
+export const SNIP_MIN_TOKENS_TO_FREE = 2_000
+
 export const RETENTION = {
   KEEP_RECENT_TOOL_RESULTS: 3,
   MIN_KEEP_MESSAGES: 6,

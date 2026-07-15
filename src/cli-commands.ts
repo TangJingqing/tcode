@@ -72,6 +72,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: 'Compress conversation context to free up context window space.',
   },
   {
+    name: '/snip',
+    usage: '/snip',
+    description: 'Remove a safe middle segment of conversation context without calling the model.',
+  },
+  {
     name: '/resume',
     usage: '/resume',
     description: 'Resume a saved session (interactive picker, or /resume <id>).',
