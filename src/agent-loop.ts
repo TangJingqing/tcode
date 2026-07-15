@@ -279,6 +279,7 @@ export async function runAgentTurn(args: {
             step,
           )
           args.onProgressMessage?.(next.content)
+          appendThinkingBlocks(next.thinkingBlocks)
           messages = [
             ...messages,
             withProviderUsage({ role: 'assistant_progress', content: next.content }, next.usage),
@@ -366,6 +367,7 @@ export async function runAgentTurn(args: {
             step,
           )
           args.onAssistantMessage?.(fallbackContent)
+          appendThinkingBlocks(next.thinkingBlocks)
           return finishTurn(
             [
               ...messages,
@@ -382,6 +384,7 @@ export async function runAgentTurn(args: {
           role: 'assistant',
           content: next.content,
         }
+        appendThinkingBlocks(next.thinkingBlocks)
         const withAssistant: ChatMessage[] = [
           ...messages,
           withProviderUsage(assistantMessage, next.usage),
