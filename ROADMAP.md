@@ -44,14 +44,13 @@ Possible follow-ups include a more uniform configurable retry policy, richer obs
 
 ### 5. Layered memory loading
 
-tcode should support a lightweight memory hierarchy similar in spirit to Claude Code's layered project context.
+**Status: implemented.** tcode now loads instruction files from a three-layer hierarchy: user global (`~/.tcode/MINI.md`), project root, and nested directories (walked upward from cwd). Supports `MINI.md`, `MINI.local.md`, `.tcode/MINI.md`, `.tcode/rules/*.md`, plus compatibility scanning for `CLAUDE.md` and `.claude/CLAUDE.md`. Includes content deduplication, `@path` include resolution, `/memory` inspection, and capacity limits.
 
-This may include:
+The `/init` command bootstraps a project: creates `.tcode/`, adds tcode entries to `.gitignore`, and generates a `MINI.md` template with auto-detected stack (languages, frameworks, verification commands, repository shape). Idempotent — safe to re-run.
 
-- global memory
-- project memory
-- nested/project-local memory
-- simple include support where appropriate
+Planned follow-ups:
+
+- auto memory read/write
 
 ### 6. Stronger provider abstraction
 

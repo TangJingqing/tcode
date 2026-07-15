@@ -931,6 +931,7 @@ async function handleInput(
   }
 
   const localCommandResult = await tryHandleLocalCommand(input, {
+    cwd: args.cwd,
     tools: args.tools,
     trace: args.tracer.getStatus(),
   })
