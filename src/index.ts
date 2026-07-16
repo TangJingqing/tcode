@@ -190,6 +190,7 @@ async function main(): Promise<void> {
         }
 
         const localCommandResult = await tryHandleLocalCommand(input, {
+          cwd,
           tools,
           trace: tracer.getStatus(),
         })

@@ -44,6 +44,7 @@ tcode 围绕一个实用的 terminal-first agent loop 构建：
 - [安装](#安装)
 - [快速开始](#快速开始)
 - [命令](#命令)
+- [分层记忆](#分层记忆)
 - [长会话与上下文管理](#长会话与上下文管理)
 - [配置](#配置)
 - [Skills 与 MCP 用法](#skills-与-mcp-用法)
@@ -222,6 +223,8 @@ TCODE_MODEL_MODE=mock npm start
 - `/config-paths`
 - `/permissions`
 - `/trace`
+- `/init`
+- `/memory`
 
 ### 终端交互能力
 
@@ -249,6 +252,32 @@ CLI 参数：
 - `tcode --fork <id>` — 分叉指定会话并恢复
 
 会话按工作目录隔离，存储在 `~/.tcode/projects/`，采用追加写入的 JSONL 格式。退出时会打印 session ID，方便后续恢复。超过 30 天的会话会自动清理。
+
+## 分层记忆
+
+tcode 启动时从三层层级加载指令文件：
+
+1. **用户全局**：`~/.tcode/MINI.md`（同时兼容读取 `~/.tcode/CLAUDE.md`），以及按文件名排序的 `~/.tcode/rules/*.md`
+2. **项目根及祖先目录**：从 cwd 向上递归，读取 `MINI.md`、`MINI.local.md`、`.tcode/MINI.md`、`CLAUDE.md`、`CLAUDE.local.md`、`.claude/CLAUDE.md`，以及每层按文件名排序的 `.tcode/rules/*.md`
+3. **优先级**：越靠近 cwd 的内容优先级越高
+
+相同内容的文件会自动去重。单文件上限约 8k 字符，总量上限约 20k 字符。在交互 UI 中输入 `/memory` 可以查看实际加载的文件、scope、行数、字符数和首行预览。
+
+指令文件支持用单独一行 `@relative/path.md` 引入其他文件。include 路径相对当前指令文件解析；绝对路径和包含父目录跳转（`..`）的路径会被跳过，循环 include 会被检测并跳过。
+
+`MINI.md` 示例：
+
+```markdown
+# Mini.md
+- 本项目使用 TypeScript。
+- 使用 TypeScript strict 模式。
+- 提交前运行 `npm run check`。
+- 保持改动最小且聚焦。
+
+@.tcode/rules/testing.md
+```
+
+`/init` 命令可初始化项目：创建 `.tcode/`、向 `.gitignore` 追加 tcode 条目、根据项目检测生成 `MINI.md` 模板。幂等 — 可安全重复运行。
 
 ## 长会话与上下文管理
 

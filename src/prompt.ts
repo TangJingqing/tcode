@@ -1,16 +1,6 @@
-import { readFile } from 'node:fs/promises'
-import os from 'node:os'
-import path from 'node:path'
 import type { McpServerSummary } from './mcp.js'
 import type { SkillSummary } from './skills.js'
-
-async function maybeRead(filePath: string): Promise<string | null> {
-  try {
-    return await readFile(filePath, 'utf8')
-  } catch {
-    return null
-  }
-}
+import { loadMemory } from './memory.js'
 
 export async function buildSystemPrompt(
   cwd: string,
@@ -20,9 +10,6 @@ export async function buildSystemPrompt(
     mcpServers?: McpServerSummary[]
   },
 ): Promise<string> {
-  const globalClaudeMd = await maybeRead(path.join(os.homedir(), '.claude', 'CLAUDE.md'))
-  const projectClaudeMd = await maybeRead(path.join(cwd, 'CLAUDE.md'))
-
   const parts = [
     '你是 tcode，一个运行在终端里的编码助手。',
     '默认行为：先理解仓库，主动使用工具，在合适的时候修改代码，并清晰说明结果。',
@@ -85,12 +72,9 @@ export async function buildSystemPrompt(
     }
   }
 
-  if (globalClaudeMd) {
-    parts.push(`来自 ~/.claude/CLAUDE.md 的全局指令:\n${globalClaudeMd}`)
-  }
-
-  if (projectClaudeMd) {
-    parts.push(`来自 ${path.join(cwd, 'CLAUDE.md')} 的项目指令:\n${projectClaudeMd}`)
+  const memorySection = await loadMemory(cwd)
+  if (memorySection) {
+    parts.push(memorySection)
   }
 
   return parts.join('\n\n')

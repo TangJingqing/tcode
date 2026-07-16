@@ -8,6 +8,8 @@ import {
 } from './config.js'
 import type { ToolRegistry } from './tool.js'
 import type { TraceStatus } from './tracing.js'
+import { initializeRepo, renderInitReport } from './init.js'
+import { discoverInstructionFiles, renderMemoryReport } from './memory.js'
 
 export type SlashCommand = {
   name: string
@@ -80,6 +82,16 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     name: '/collapse',
     usage: '/collapse',
     description: 'Project old safe context spans into summaries without deleting the transcript.',
+  },
+  {
+    name: '/init',
+    usage: '/init',
+    description: 'Create .tcode/, .gitignore entries, and MINI.md in the current project (idempotent).',
+  },
+  {
+    name: '/memory',
+    usage: '/memory',
+    description: 'Show instruction files loaded into the system prompt.',
   },
   {
     name: '/resume',
@@ -161,10 +173,13 @@ export function findMatchingSlashCommands(input: string): string[] {
 export async function tryHandleLocalCommand(
   input: string,
   context?: {
+    cwd?: string
     tools?: ToolRegistry
     trace?: TraceStatus
   },
 ): Promise<string | null> {
+  const cwd = context?.cwd ?? process.cwd()
+
   if (input === '/') {
     return formatSlashCommands()
   }
@@ -249,6 +264,16 @@ export async function tryHandleLocalCommand(
         : 'trace: unavailable',
       runtime.sourceSummary,
     ].join('\n')
+  }
+
+  if (input === '/init') {
+    const report = await initializeRepo(cwd)
+    return renderInitReport(report)
+  }
+
+  if (input === '/memory') {
+    const files = await discoverInstructionFiles(cwd)
+    return renderMemoryReport(files, cwd)
   }
 
   if (input === '/model') {

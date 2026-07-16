@@ -44,6 +44,7 @@ The project is intentionally compact, so the control flow, tool model, tracing b
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Commands](#commands)
+- [Layered Memory](#layered-memory)
 - [Long Sessions and Context Management](#long-sessions-and-context-management)
 - [Configuration](#configuration)
 - [Skills and MCP Usage](#skills-and-mcp-usage)
@@ -223,6 +224,8 @@ TCODE_MODEL_MODE=mock npm start
 - `/config-paths`
 - `/permissions`
 - `/trace`
+- `/init`
+- `/memory`
 
 ### Terminal interaction
 
@@ -250,6 +253,32 @@ CLI flags:
 - `tcode --fork <id>` — fork a session and resume the fork
 
 Sessions are scoped per working directory and stored in `~/.tcode/projects/` using append-only JSONL. On exit, tcode prints the session ID so you can resume later. Sessions older than 30 days are automatically cleaned up.
+
+## Layered Memory
+
+tcode loads instruction files at startup from a three-layer hierarchy:
+
+1. **User global**: `~/.tcode/MINI.md` (also reads `~/.tcode/CLAUDE.md` for compatibility) plus sorted `~/.tcode/rules/*.md`
+2. **Project root and ancestors**: walks upward from cwd, reading `MINI.md`, `MINI.local.md`, `.tcode/MINI.md`, `CLAUDE.md`, `CLAUDE.local.md`, `.claude/CLAUDE.md`, plus sorted `.tcode/rules/*.md` at each level
+3. **Priority**: content closer to cwd takes precedence over broader layers
+
+Files with identical content are deduplicated. Per-file limit is ~8k chars, total limit ~20k chars. Use `/memory` in the interactive UI to inspect the exact files loaded, their scopes, line counts, and previews.
+
+Instruction files can include other files with a line containing only `@relative/path.md`. Includes are resolved relative to the source file; absolute paths and parent-directory (`..`) escapes are skipped for safety, and cycles are detected.
+
+Example `MINI.md`:
+
+```markdown
+# Mini.md
+- This project uses TypeScript.
+- Use TypeScript strict mode.
+- Run `npm run check` before committing.
+- Keep changes minimal and focused.
+
+@.tcode/rules/testing.md
+```
+
+The `/init` command bootstraps a project by creating `.tcode/`, adding tcode entries to `.gitignore`, and generating a `MINI.md` template with auto-detected stack. Idempotent — safe to re-run.
 
 ## Long Sessions and Context Management
 
