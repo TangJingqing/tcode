@@ -41,6 +41,7 @@ const CHARS_PER_TOKEN_BASE: Record<string, number> = {
   assistant_tool_call: 2.5,
   tool_result: 2.0,
   context_summary: 3.5,
+  snip_boundary: 3.5,
 }
 
 // CJK 字符的 chars/token 基准（中/日/韩文字符在大多数 tokenizer 中 ≈ 1-2 字符/token）
@@ -80,6 +81,8 @@ function getMessageText(message: ChatMessage): string {
     case 'assistant_progress':
     case 'tool_result':
     case 'context_summary':
+      return message.content
+    case 'snip_boundary':
       return message.content
     case 'assistant_thinking':
       try {

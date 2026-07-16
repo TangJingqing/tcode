@@ -9,6 +9,7 @@ import type {
 } from './types.js'
 import type { RuntimeConfig } from './config.js'
 import { resolveMaxOutputTokens } from './utils/context.js'
+import { buildAnthropicSnipBoundaryText } from './compact/snipCompact.js'
 
 const DEFAULT_MAX_RETRIES = 4
 const BASE_RETRY_DELAY_MS = 500
@@ -280,6 +281,13 @@ function toAnthropicMessages(messages: ChatMessage[]): {
     if (message.role === 'context_summary') {
       pushAnthropicMessage(converted, 'user', toTextBlock(
         `[Context Summary from earlier conversation]\n${message.content}`,
+      ))
+      continue
+    }
+
+    if (message.role === 'snip_boundary') {
+      pushAnthropicMessage(converted, 'user', toTextBlock(
+        buildAnthropicSnipBoundaryText(),
       ))
       continue
     }

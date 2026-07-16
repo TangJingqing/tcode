@@ -20,6 +20,33 @@ Conversation to summarize:
 ${conversationText}`
 }
 
+export function buildContextCollapseSummaryPrompt(conversationText: string): string {
+  return `You are creating a local context-collapse summary for an AI coding session.
+The summary will replace only this older message span in the model-visible context.
+The original transcript remains preserved outside the model-visible projection.
+
+Produce the final summary in <summary> tags.
+
+Preserve:
+- User intent and active goals
+- Completed tasks and current state
+- Important decisions and constraints
+- Tool calls and tool results that still matter
+- File reads/writes and code changes, with paths, function names, config names, and commands
+- Errors, failures, warnings, and exact messages when relevant
+- TODOs, uncertainty, follow-up constraints, and anything still relevant later
+
+Rules:
+- Do not invent facts or outcomes
+- Do not omit critical paths, function names, configuration keys, file paths, or error text
+- Keep it concise, but prefer specificity over vague compression
+- This is not a full conversation compact; summarize only the provided span
+
+Messages to summarize:
+
+${conversationText}`
+}
+
 export function parseSummaryFromResponse(response: string): string | null {
   const summaryMatch = response.match(/<summary>([\s\S]*?)<\/summary>/)
   if (summaryMatch?.[1]) {

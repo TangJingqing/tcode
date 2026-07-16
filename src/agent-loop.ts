@@ -5,6 +5,16 @@ import type { AgentTracer } from './tracing.js'
 import { summarizeAgentStep, summarizeMessages } from './tracing.js'
 import { microcompact } from './compact/microcompact.js'
 import { autoCompact } from './compact/auto-compact.js'
+import {
+  applyContextCollapseIfNeeded,
+  createContextCollapseState,
+  type ContextCollapseResult,
+  type ContextCollapseState,
+} from './compact/context-collapse.js'
+import {
+  snipCompactConversation,
+  type SnipCompactResult,
+} from './compact/snipCompact.js'
 import { computeContextStats } from './utils/token-estimator.js'
 import {
   applyToolResultBudget,
@@ -157,9 +167,12 @@ export async function runAgentTurn(args: {
   onProgressMessage?: (content: string) => void
   tracer?: AgentTracer
   modelName?: string
-  onAutoCompact?: (result: CompressionResult) => void
+  onAutoCompact?: (result: CompressionResult) => void | Promise<void>
+  onSnipCompact?: (result: SnipCompactResult) => void | Promise<void>
+  onContextCollapse?: (result: ContextCollapseResult) => void | Promise<void>
   onContextStats?: (stats: import('./utils/token-estimator.js').ContextStats) => void
   contentReplacementState?: ContentReplacementState
+  contextCollapseState?: ContextCollapseState
 }): Promise<ChatMessage[]> {
   const maxSteps = args.maxSteps ?? 6
   const modelName = args.modelName ?? ''
@@ -168,8 +181,20 @@ export async function runAgentTurn(args: {
   let recoverableThinkingRetryCount = 0
   let toolErrorCount = 0
   let sawToolResultThisTurn = false
+  let snippedThisTurn = false
   const contentReplacementState =
     args.contentReplacementState ?? createContentReplacementState()
+  let contextCollapseState =
+    args.contextCollapseState ?? createContextCollapseState()
+
+  const replaceContextCollapseState = (nextState: ContextCollapseState) => {
+    contextCollapseState = nextState
+    if (args.contextCollapseState) {
+      args.contextCollapseState.spans = [...nextState.spans]
+      args.contextCollapseState.enabled = nextState.enabled
+      args.contextCollapseState.consecutiveFailures = nextState.consecutiveFailures
+    }
+  }
 
   const pushContinuationPrompt = (content: string) => {
     messages = [
@@ -210,27 +235,65 @@ export async function runAgentTurn(args: {
 
   try {
     for (let step = 0; step < maxSteps; step++) {
-      // Microcompact: lightweight tool_result cleanup on every step
+      let latestStats: import('./utils/token-estimator.js').ContextStats | null = null
+      let modelMessages = messages
+
       if (modelName) {
+        latestStats = computeContextStats(messages, modelName)
+
+        if (!snippedThisTurn) {
+          const snipResult = await snipCompactConversation({
+            messages,
+            contextStats: latestStats,
+            modelContextWindow: latestStats.effectiveInput,
+          })
+          if (snipResult.didSnip) {
+            messages = snipResult.messages
+            snippedThisTurn = true
+            await args.onSnipCompact?.(snipResult)
+            latestStats = computeContextStats(messages, modelName)
+            args.onContextStats?.(latestStats)
+          }
+        }
+
+        const beforeMicrocompact = messages
         messages = microcompact(messages, modelName)
+        if (messages !== beforeMicrocompact) {
+          latestStats = computeContextStats(messages, modelName)
+          args.onContextStats?.(latestStats)
+        }
+
+        const collapseResult = await applyContextCollapseIfNeeded(
+          messages,
+          modelName,
+          args.model,
+          contextCollapseState,
+        )
+        replaceContextCollapseState(collapseResult.state)
+        modelMessages = collapseResult.messages
+        if (collapseResult.collapsed) {
+          await args.onContextCollapse?.(collapseResult)
+          latestStats = computeContextStats(modelMessages, modelName)
+          args.onContextStats?.(latestStats)
+        } else if (modelMessages !== messages) {
+          latestStats = computeContextStats(modelMessages, modelName)
+          args.onContextStats?.(latestStats)
+        }
       }
 
-      // AutoCompact: LLM-based compression when context is critical
-      // step=0 always checks; mid-turn checks if utilization jumped into critical zone
-      if (modelName) {
-        const stats = computeContextStats(messages, modelName)
-        args.onContextStats?.(stats)
-        const shouldCheck =
-          step === 0 ||
-          stats.warningLevel === 'critical' ||
-          stats.warningLevel === 'blocked'
-        if (shouldCheck) {
-          const result = await autoCompact(messages, modelName, args.model)
+      // AutoCompact: LLM-based compression when context is critical (first step only)
+      if (step === 0 && modelName) {
+        latestStats = latestStats ?? computeContextStats(modelMessages, modelName)
+        args.onContextStats?.(latestStats)
+        if (latestStats.warningLevel === 'critical' || latestStats.warningLevel === 'blocked') {
+          const result = await autoCompact(modelMessages, modelName, args.model)
           if (result) {
             messages = result.messages
-            args.onAutoCompact?.(result)
-            const updatedStats = computeContextStats(messages, modelName)
-            args.onContextStats?.(updatedStats)
+            modelMessages = messages
+            replaceContextCollapseState(createContextCollapseState())
+            await args.onAutoCompact?.(result)
+            latestStats = computeContextStats(messages, modelName)
+            args.onContextStats?.(latestStats)
           }
         }
       }
@@ -243,7 +306,7 @@ export async function runAgentTurn(args: {
         },
         step,
       )
-      const next = await args.model.next(messages, {
+      const next = await args.model.next(modelMessages, {
         tracer: args.tracer,
         stepIndex: step,
       })

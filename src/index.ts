@@ -19,6 +19,10 @@ import type { ChatMessage } from './types.js'
 import { renderBanner } from './ui.js'
 import { runTtyApp } from './tty-app.js'
 import { runAgentTurn } from './agent-loop.js'
+import {
+  applyContextCollapseIfNeeded,
+  createContextCollapseState,
+} from './compact/context-collapse.js'
 import { createContentReplacementState } from './utils/tool-result-storage.js'
 import { createAgentTracer, resolveTraceConfig } from './tracing.js'
 
@@ -106,6 +110,7 @@ async function main(): Promise<void> {
     },
   ]
   const contentReplacementState = createContentReplacementState()
+  const contextCollapseState = createContextCollapseState()
 
   async function refreshSystemPrompt(): Promise<void> {
     messages[0] = {
@@ -144,6 +149,7 @@ async function main(): Promise<void> {
         alreadySavedCount: 0,
         resumeTarget: resolvedResumeTarget,
         contentReplacementState,
+        contextCollapseState,
       })
       return
     }
@@ -192,6 +198,45 @@ async function main(): Promise<void> {
           continue
         }
 
+        if (input === '/collapse') {
+          if (!runtime?.model) {
+            console.log('\nNo model configured. Cannot collapse context.\n')
+            continue
+          }
+
+          const result = await applyContextCollapseIfNeeded(
+            messages,
+            runtime.model,
+            model,
+            contextCollapseState,
+            {
+              utilizationThreshold: 0,
+              reason: 'manual',
+            },
+          )
+          contextCollapseState.spans = [...result.state.spans]
+          contextCollapseState.enabled = result.state.enabled
+          contextCollapseState.consecutiveFailures = result.state.consecutiveFailures
+
+          if (!result.collapsed) {
+            console.log(
+              result.state.enabled
+                ? '\nNothing safe to collapse.\n'
+                : '\nContext collapse is disabled after repeated summary failures.\n',
+            )
+            continue
+          }
+
+          const savedTokens = result.spans.reduce(
+            (sum, span) => sum + Math.max(0, span.tokensBefore - span.tokensAfter),
+            0,
+          )
+          console.log(
+            `\nContext collapse projected ${result.spans.length} span${result.spans.length === 1 ? '' : 's'} into model-visible summaries, saving ~${Math.round(savedTokens)} tokens. Original transcript is preserved.\n`,
+          )
+          continue
+        }
+
         if (input.startsWith('/')) {
           const matches = findMatchingSlashCommands(input)
           if (matches.length > 0) {
@@ -221,6 +266,7 @@ async function main(): Promise<void> {
           maxSteps: 8,
           tracer,
           contentReplacementState,
+          contextCollapseState,
         })
       } catch (error) {
         const message =
