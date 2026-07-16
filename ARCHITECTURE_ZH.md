@@ -26,7 +26,7 @@ tcode 优先保留这些能力：
 - 保留消息驱动的终端交互节奏
 - 保留路径权限、命令权限、写入审批这些安全边界
 - 保留受 Claude Code 启发的扩展点：本地 skills 和 MCP 动态工具
-- 通过追加写入的会话历史、compact boundary、provider usage 上下文记账和大工具输出替换，让长时间会话保持可用
+- 通过追加写入的会话历史、compact boundary、provider usage 上下文记账、大工具输出替换、裁剪压缩和上下文折叠，让长时间会话保持可用
 - 增加 tracing，用于记录 agent turn、模型输入输出、工具调用和错误
 
 ## 待完成的功能
@@ -40,7 +40,7 @@ tcode 优先保留这些能力：
 - 更复杂的 permission 模式
 - feature flag 体系
 - telemetry / analytics
-- 分层项目 memory 与更完整的会话搜索
+- 分层项目 memory 与更完整的会话搜索（基础分层 memory 加载已实现）
 
 ## tcode 当前实现
 
@@ -53,10 +53,10 @@ tcode 优先保留这些能力：
 - `src/mcp.ts`: 启动 stdio MCP server，协商兼容的 framing，并把远端 MCP tools 封装成当前工具协议
 - `src/background-tasks.ts`: 给 `run_command` 和 TUI 使用的最小 background shell task 注册表
 - `src/manage-cli.ts`: 管理持久化 MCP 配置和本地安装的 skills
-- `src/anthropic-adapter.ts`: Anthropic 兼容 Messages API 适配器
+- `src/anthropic-adapter.ts`: Anthropic 兼容 Messages API 适配器，支持跨工具调用轮次保留 thinking block
 - `src/utils/token-estimator.ts`: 结构化 token accounting。provider-reported usage 可用时作为主数据源；本地估算只用于缺失 usage 的 fallback，以及最新 provider usage boundary 之后的 tail messages。
 - `src/utils/tool-result-storage.ts`: 将超大工具结果持久化到 tcode 本地数据目录，并在可见上下文里替换成预览和文件路径；同一次运行中会复用稳定替换结果。
-- `src/compact/*`: 上下文压缩与自动压缩。auto-compact 使用结构化 accounting total；compact 后会把保留下来的压缩前 provider usage 标记为 stale。
+- `src/compact/*`: 上下文压缩与自动压缩。同时包含裁剪压缩（snip compact：确定性移除中段历史，保护文件编辑和出错轮次）和上下文折叠（context collapse：投影层识别可摘要的对话片段并用摘要替换）。auto-compact 使用结构化 accounting total；compact 后会把保留下来的压缩前 provider usage 标记为 stale。
 - `src/mock-model.ts`: 离线回退适配器
 - `src/permissions.ts`: 路径、命令、编辑审批与 allowlist / denylist
 - `src/session.ts`: 多会话持久化，追加写入 JSONL，parentUuid 树结构，compact boundary，会话分叉，过期清理
@@ -78,6 +78,15 @@ tcode 的运行时状态有意保持简单：
 - 本地 token 估算只作为 provider usage 缺失时的 fallback，或作为最新 provider usage boundary 之后新增消息的 tail estimate。
 - 超大工具输出会被移出 prompt context，保存到 `~/.tcode/tool-results/`，模型只看到预览和完整输出路径。
 - Tracing span 按 session 和 agent turn 创建，记录关键决策但不改变行为。
+
+## 压缩策略
+
+tcode 采用两种互补策略来让长对话保持在 context window 限制内：
+
+- **裁剪压缩（Snip compact，确定性）**：安全地移除中段历史消息，同时保护文件编辑操作和出错轮次，保留近期对话尾部完整。在上下文利用率超过配置阈值时触发。
+- **上下文折叠（Context collapse，投影层）**：识别对话中可摘要的片段，用模型生成的摘要进行替换。当仅靠裁剪压缩不够或需要更深层的旧历史压缩时，作为补充策略使用。
+
+两种策略的触发都基于结构化上下文记账，而非简单的消息数量。压缩后，保留下来的压缩前 provider usage 会被显式标记为 stale，确保下一次上下文计算时不会把旧 response 的 usage 总量当作当前对话大小。
 
 ## UI 架构
 
@@ -107,7 +116,7 @@ tcode 的一个优势，是用更轻量的实现方式，提供了类 Claude Cod
 - 理解权限审批和文件 review 流程
 - 理解如何在不引入重型插件平台的情况下接入 skills 和 MCP
 - 理解一种更接近 Claude Code 的"前台工具执行 / 后台 shell task"区分方式
-- 研究会话恢复、compact boundary、provider usage 与大输出落盘如何整合进一个紧凑 runtime
+- 研究会话恢复、compact boundary、provider usage、大输出落盘、裁剪压缩和上下文折叠如何整合进一个紧凑 runtime
 - 通过 tracing 观察 agent turn、模型响应和工具调用的执行细节
 - 试验终端 UI 的组织方式
 - 在小代码量基础上继续做自己的定制开发
