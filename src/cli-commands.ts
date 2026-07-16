@@ -77,6 +77,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: 'Remove a safe middle segment of conversation context without calling the model.',
   },
   {
+    name: '/collapse',
+    usage: '/collapse',
+    description: 'Project old safe context spans into summaries without deleting the transcript.',
+  },
+  {
     name: '/resume',
     usage: '/resume',
     description: 'Resume a saved session (interactive picker, or /resume <id>).',

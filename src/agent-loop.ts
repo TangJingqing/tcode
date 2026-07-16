@@ -6,6 +6,12 @@ import { summarizeAgentStep, summarizeMessages } from './tracing.js'
 import { microcompact } from './compact/microcompact.js'
 import { autoCompact } from './compact/auto-compact.js'
 import {
+  applyContextCollapseIfNeeded,
+  createContextCollapseState,
+  type ContextCollapseResult,
+  type ContextCollapseState,
+} from './compact/context-collapse.js'
+import {
   snipCompactConversation,
   type SnipCompactResult,
 } from './compact/snipCompact.js'
@@ -163,8 +169,10 @@ export async function runAgentTurn(args: {
   modelName?: string
   onAutoCompact?: (result: CompressionResult) => void | Promise<void>
   onSnipCompact?: (result: SnipCompactResult) => void | Promise<void>
+  onContextCollapse?: (result: ContextCollapseResult) => void | Promise<void>
   onContextStats?: (stats: import('./utils/token-estimator.js').ContextStats) => void
   contentReplacementState?: ContentReplacementState
+  contextCollapseState?: ContextCollapseState
 }): Promise<ChatMessage[]> {
   const maxSteps = args.maxSteps ?? 6
   const modelName = args.modelName ?? ''
@@ -176,6 +184,17 @@ export async function runAgentTurn(args: {
   let snippedThisTurn = false
   const contentReplacementState =
     args.contentReplacementState ?? createContentReplacementState()
+  let contextCollapseState =
+    args.contextCollapseState ?? createContextCollapseState()
+
+  const replaceContextCollapseState = (nextState: ContextCollapseState) => {
+    contextCollapseState = nextState
+    if (args.contextCollapseState) {
+      args.contextCollapseState.spans = [...nextState.spans]
+      args.contextCollapseState.enabled = nextState.enabled
+      args.contextCollapseState.consecutiveFailures = nextState.consecutiveFailures
+    }
+  }
 
   const pushContinuationPrompt = (content: string) => {
     messages = [
@@ -217,6 +236,7 @@ export async function runAgentTurn(args: {
   try {
     for (let step = 0; step < maxSteps; step++) {
       let latestStats: import('./utils/token-estimator.js').ContextStats | null = null
+      let modelMessages = messages
 
       if (modelName) {
         latestStats = computeContextStats(messages, modelName)
@@ -242,16 +262,35 @@ export async function runAgentTurn(args: {
           latestStats = computeContextStats(messages, modelName)
           args.onContextStats?.(latestStats)
         }
+
+        const collapseResult = await applyContextCollapseIfNeeded(
+          messages,
+          modelName,
+          args.model,
+          contextCollapseState,
+        )
+        replaceContextCollapseState(collapseResult.state)
+        modelMessages = collapseResult.messages
+        if (collapseResult.collapsed) {
+          await args.onContextCollapse?.(collapseResult)
+          latestStats = computeContextStats(modelMessages, modelName)
+          args.onContextStats?.(latestStats)
+        } else if (modelMessages !== messages) {
+          latestStats = computeContextStats(modelMessages, modelName)
+          args.onContextStats?.(latestStats)
+        }
       }
 
       // AutoCompact: LLM-based compression when context is critical (first step only)
       if (step === 0 && modelName) {
-        latestStats = latestStats ?? computeContextStats(messages, modelName)
+        latestStats = latestStats ?? computeContextStats(modelMessages, modelName)
         args.onContextStats?.(latestStats)
         if (latestStats.warningLevel === 'critical' || latestStats.warningLevel === 'blocked') {
-          const result = await autoCompact(messages, modelName, args.model)
+          const result = await autoCompact(modelMessages, modelName, args.model)
           if (result) {
             messages = result.messages
+            modelMessages = messages
+            replaceContextCollapseState(createContextCollapseState())
             await args.onAutoCompact?.(result)
             latestStats = computeContextStats(messages, modelName)
             args.onContextStats?.(latestStats)
@@ -267,7 +306,7 @@ export async function runAgentTurn(args: {
         },
         step,
       )
-      const next = await args.model.next(messages, {
+      const next = await args.model.next(modelMessages, {
         tracer: args.tracer,
         stepIndex: step,
       })

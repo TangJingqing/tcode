@@ -11,10 +11,15 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { TCODE_PROJECTS_DIR } from './config.js'
 import type { ChatMessage } from './types.js'
+import {
+  createContextCollapseState,
+  type CollapseSpan,
+  type ContextCollapseState,
+} from './compact/context-collapse.js'
 
 const MAX_TITLE_LENGTH = 60
 
-type EventType = 'system' | 'user' | 'assistant' | 'thinking' | 'progress' | 'tool_call' | 'tool_result' | 'summary' | 'compact_boundary' | 'snip_boundary' | 'rename'
+type EventType = 'system' | 'user' | 'assistant' | 'thinking' | 'progress' | 'tool_call' | 'tool_result' | 'summary' | 'compact_boundary' | 'snip_boundary' | 'context_collapse' | 'rename'
 
 export type SnipBoundaryMetadata = {
   type: 'snip_boundary'
@@ -37,6 +42,7 @@ type SessionEvent = {
   subtype?: string
   compactMetadata?: { trigger: string; preTokens: number; postTokens: number }
   snipMetadata?: SnipBoundaryMetadata
+  contextCollapseSpan?: CollapseSpan
   title?: string
 }
 
@@ -279,6 +285,33 @@ export async function appendSnipBoundary(
   await appendFile(filePath, JSON.stringify(event) + '\n', 'utf8')
 }
 
+export async function appendContextCollapseSpan(
+  cwd: string,
+  sessionId: string,
+  span: CollapseSpan,
+): Promise<void> {
+  const dir = projectDir(cwd)
+  const filePath = sessionFilePath(cwd, sessionId)
+  await mkdir(dir, { recursive: true })
+
+  const lastUuid = await readLastEventUuid(filePath)
+  const now = new Date().toISOString()
+
+  const event: SessionEvent = {
+    type: 'context_collapse',
+    subtype: 'context_collapse',
+    uuid: span.id,
+    timestamp: now,
+    sessionId,
+    cwd,
+    parentUuid: null,
+    logicalParentUuid: lastUuid,
+    contextCollapseSpan: span,
+  }
+
+  await appendFile(filePath, JSON.stringify(event) + '\n', 'utf8')
+}
+
 export async function appendCompactBoundary(
   cwd: string,
   sessionId: string,
@@ -364,6 +397,41 @@ export async function loadSession(
     }
 
     return messages.length > 0 ? messages : null
+  } catch {
+    return null
+  }
+}
+
+export async function loadContextCollapseState(
+  cwd: string,
+  sessionId: string,
+): Promise<ContextCollapseState | null> {
+  try {
+    const content = await readFile(sessionFilePath(cwd, sessionId), 'utf8')
+    const lines = content.trim().split('\n').filter(Boolean)
+
+    let lastBoundaryIndex = -1
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const event = parseEvent(lines[i]!)
+      if (event?.type === 'compact_boundary') {
+        lastBoundaryIndex = i
+        break
+      }
+    }
+
+    const state = createContextCollapseState()
+    for (let i = lastBoundaryIndex + 1; i < lines.length; i++) {
+      const event = parseEvent(lines[i]!)
+      if (event?.type !== 'context_collapse' || !event.contextCollapseSpan) {
+        continue
+      }
+      if (event.contextCollapseSpan.status !== 'committed') {
+        continue
+      }
+      state.spans.push(event.contextCollapseSpan)
+    }
+
+    return state.spans.length > 0 ? state : null
   } catch {
     return null
   }
@@ -628,6 +696,12 @@ export async function loadTranscript(
           entries.push({
             kind: 'assistant',
             body: `[Snipped earlier context: removed ${event.snipMetadata?.removedCount ?? '?'} messages, freed ~${event.snipMetadata?.tokensFreed ?? '?'} tokens]`,
+          })
+          break
+        case 'context_collapse':
+          entries.push({
+            kind: 'assistant',
+            body: `[Context collapsed: ${event.contextCollapseSpan?.messageIds?.length ?? '?'} messages projected into summary]`,
           })
           break
       }
