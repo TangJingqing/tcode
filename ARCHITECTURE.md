@@ -25,7 +25,7 @@ In other words, tcode is a smaller, more controllable terminal coding assistant 
 - Keep a message-driven terminal interaction rhythm
 - Keep safety boundaries: path permissions, command permissions, and write approval
 - Keep Claude Code-inspired extension points: local skills and MCP-backed tools
-- Keep long-running sessions usable through append-only session history, compact boundaries, provider-usage context accounting, and large tool-output replacement
+- Keep long-running sessions usable through append-only session history, compact boundaries, provider-usage context accounting, large tool-output replacement, snip compact, and context collapse
 - Keep agent behavior observable through optional tracing
 
 ## Planned / not yet built
@@ -39,7 +39,7 @@ In other words, tcode is a smaller, more controllable terminal coding assistant 
 - More complex permission modes
 - Feature-flag system
 - Telemetry / analytics
-- Layered project memory and richer session search
+- Layered project memory and richer session search (basic layered memory loading is now implemented)
 
 ## Current implementation
 
@@ -52,10 +52,10 @@ In other words, tcode is a smaller, more controllable terminal coding assistant 
 - `src/mcp.ts`: launches stdio MCP servers, negotiates framing compatibility, and wraps remote MCP tools into local tool definitions
 - `src/background-tasks.ts`: minimal background shell task registry used by `run_command` and the TUI
 - `src/manage-cli.ts`: manages persisted MCP configs and installed local skills
-- `src/anthropic-adapter.ts`: Anthropic-compatible Messages API adapter
+- `src/anthropic-adapter.ts`: Anthropic-compatible Messages API adapter with thinking-block preservation across tool-call turns
 - `src/utils/token-estimator.ts`: structured token accounting. Provider-reported usage is the primary source when available; local estimation is reserved for missing usage and for tail messages after the latest provider usage boundary.
 - `src/utils/tool-result-storage.ts`: persists oversized tool results under tcode's local data directory, replaces visible context with a preview plus path, and reuses stable replacements across a run.
-- `src/compact/*`: context compression and auto-compact. Auto-compact uses structured accounting totals, and compaction marks retained pre-compact provider usage stale.
+- `src/compact/*`: context compression and auto-compact. Includes both snip compact (deterministic middle-history removal that protects file-editing and error turns) and context collapse (projection-layer identification and summarization of conversation spans). Auto-compact uses structured accounting totals, and compaction marks retained pre-compact provider usage stale.
 - `src/mock-model.ts`: offline fallback adapter
 - `src/permissions.ts`: path, command, and edit approval with allowlist / denylist
 - `src/session.ts`: multi-session persistence with append-only JSONL, parentUuid tree structure, compact boundary, session forking, and expiry cleanup
@@ -77,6 +77,15 @@ tcode keeps runtime state deliberately simple:
 - Local token estimation is only a fallback or a tail estimate after the latest provider usage boundary.
 - Very large tool outputs are moved out of the prompt context and stored under `~/.tcode/tool-results/`, leaving the model a preview and a path to the full output.
 - Tracing spans are created per session and per agent turn, recording key decisions without changing behavior.
+
+## Compaction Strategies
+
+tcode employs two complementary strategies for keeping long conversations within context limits:
+
+- **Snip compact** (deterministic): safely removes middle-history messages while preserving file-editing operations and error turns, keeping the recent conversation tail intact. This triggers when context utilization crosses a configured threshold.
+- **Context collapse** (projection layer): identifies summarizable spans within the conversation and replaces them with model-generated summaries. This acts as a deeper compression pass when snipping alone is insufficient.
+
+Both strategies are driven by structured context accounting rather than raw message counts. After compaction, retained pre-compact provider usage is explicitly marked stale so the next context calculation does not treat an old response total as the current conversation size.
 
 ## UI Architecture
 
@@ -106,7 +115,7 @@ That makes it well suited to:
 - Understanding permission approval and file review flows
 - Seeing how skills and external MCP tools can be added without a heavy plugin platform
 - Seeing a lightweight Claude Code-style distinction between foreground tool execution and background shell tasks
-- Studying how session restore, compact boundaries, provider usage, and large output storage fit into a compact runtime
+- Studying how session restore, compact boundaries, provider usage, large output storage, snip compact, and context collapse fit into a compact runtime
 - Observing agent turn, model response, and tool call execution details through tracing
 - Experimenting with how terminal UIs are organized
 - Customizing further on top of a small codebase
