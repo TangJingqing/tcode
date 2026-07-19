@@ -1,10 +1,5 @@
 # tcode
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Editor-tcode-D97757?style=for-the-badge" alt="Editor: tcode" />
-  <img src="https://img.shields.io/badge/%23tcode-Project-B85C3F?style=for-the-badge" alt="#tcode" />
-  <img src="https://img.shields.io/badge/%23lightweight-Focus-F0EBE1?style=for-the-badge&labelColor=8B8B8B" alt="#lightweight" />
-</p>
 
 ---
 
